@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Builds
+build/
+dist/
+*.log
+
+# Mobile specific
+Frontend/mobile/android/app/build/
+Frontend/mobile/ios/build/
+Frontend/mobile/android/.gradle/
+Frontend/mobile/ios/Pods/
+*.jks
+*.keystore
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials
+*.pem
+*.key

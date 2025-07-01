@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "prefabPath": "/Users/sunilkumar/.gradle/caches/modules-2/files-2.1/com.google.prefab/cli/2.1.0/aa32fec809c44fa531f01dcfb739b5b3304d3050/cli-2.1.0-all.jar",
+  "packages": [
+    "/Users/sunilkumar/.gradle/caches/8.13/transforms/9489950b9cd40794724831c1f8ab3f25/transformed/react-android-0.79.1-debug/prefab",
+    "/Users/sunilkumar/Desktop/aniflixx_docs/aniflixx/node_modules/react-native-reanimated/android/build/intermediates/prefab_package/debug/prefab",
+    "/Users/sunilkumar/.gradle/caches/8.13/transforms/c1ca9c9a897c975ca4a67c88e5d8c1a7/transformed/hermes-android-0.79.1-debug/prefab",
+    "/Users/sunilkumar/.gradle/caches/8.13/transforms/fd87f9792f5bb7b90eca355eb71bbb68/transformed/fbjni-0.7.0/prefab"
+  ]
+}
