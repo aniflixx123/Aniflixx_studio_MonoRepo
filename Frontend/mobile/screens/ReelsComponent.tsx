@@ -1,4 +1,4 @@
-// ReelsComponent.tsx - Fixed Navigation Issues
+// ReelsComponent.tsx - Fixed Navigation Issues (No Auto-Scroll on Video Complete)
 import React, { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useMemo, useState, memo } from 'react';
 import {
   StyleSheet,
@@ -681,7 +681,7 @@ const ReelsComponent = forwardRef<ReelsComponentHandle, ReelsComponentProps>((pr
     };
   }, [currentFeedIndex, feedData, setCurrentReelIndex, loadMoreReels, commentsVisible, lastAdIndex, feedIndexToReelIndex]);
 
-  // Render function
+  // Render function - REMOVED auto-scroll on video complete
   const renderFeedItem = useCallback(({ item, index }: { item: FeedItem; index: number }) => {
     const isCurrentItem = index === currentFeedIndex;
     const shouldPreload = preloadedIndexes.has(index);
@@ -717,19 +717,9 @@ const ReelsComponent = forwardRef<ReelsComponentHandle, ReelsComponentProps>((pr
         onToggleMute={toggleMute}
         onTogglePlay={togglePlay}
         onVideoComplete={() => {
-          if (isCurrentItem && index < feedData.length - 1) {
-            if (commentsVisible) {
-              setCommentsVisible(false);
-              setActiveReelId(null);
-            }
-            InteractionManager.runAfterInteractions(() => {
-              flatListRef.current?.scrollToIndex({
-                index: index + 1,
-                animated: true,
-                viewPosition: 0.5
-              });
-            });
-          }
+          // Video complete callback - NO AUTO-SCROLL
+          // You can add any other logic here if needed when video completes
+          console.log('Video completed for reel:', reel._id);
         }}
         isMuted={isMuted}
         isPlaying={isPlaying && isCurrentItem}
