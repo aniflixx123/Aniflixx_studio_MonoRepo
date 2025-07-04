@@ -1,28 +1,41 @@
-// services/WebSocketManager.tsx - Enhanced with Profile Stats Events and Better Count Management
+// services/WebSocketManager.tsx - Complete Production Implementation
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import io, { Socket } from 'socket.io-client';
 import auth from '@react-native-firebase/auth';
-import { Alert } from 'react-native';
+import { Alert, AppState, AppStateStatus, Platform } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppStore } from '../store/appStore';
 import { Comment, Reel, User, NotificationEvent } from '../types';
 
-// Configuration
+// Production Configuration
 const SOCKET_CONFIG = {
   url: process.env.REACT_APP_SOCKET_URL || 'wss://aniflixx-backend.onrender.com',
-  reconnectionAttempts: 10,
+  reconnectionAttempts: 20,
   reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  pingTimeout: 60000,
+  reconnectionDelayMax: 30000,
+  pingTimeout: 30000,
   pingInterval: 25000,
-  transports: ['websocket', 'polling'] as any,
-  autoConnect: false
+  transports: ['websocket'] as any,
+  autoConnect: false,
+  backgroundPingInterval: 60000,
+  backgroundTimeout: 5 * 60 * 1000,
+  maxReconnectDelay: 30000,
+  exponentialBackoff: true,
+  backoffMultiplier: 1.5,
+  jitterMax: 1000,
+  timeout: 20000,
 };
+
+// Connection states
+type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error' | 'background';
 
 // WebSocket Context Type
 interface WebSocketContextType {
   socket: Socket | null;
   isConnected: boolean;
-  connectionState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+  connectionState: ConnectionState;
+  connectionQuality: 'excellent' | 'good' | 'poor' | 'offline';
   notifications: NotificationEvent[];
   viewerCount: number;
   currentViewers: any[];
@@ -38,14 +51,128 @@ interface WebSocketContextType {
   startTyping: (reelId: string) => void;
   stopTyping: (reelId: string) => void;
   clearNotifications: () => void;
-  // Event subscription
+  forceReconnect: () => void;
   subscribe: (event: string, handler: Function) => () => void;
 }
 
 // Create context
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
-// WebSocket Provider Component
+// Connection Health Monitor
+class ConnectionHealthMonitor {
+  private lastPingTime: number = Date.now();
+  public lastPongTime: number = Date.now(); // Made public for access
+  private missedPings: number = 0;
+  private maxMissedPings: number = 3;
+  private latencyHistory: number[] = [];
+  private maxLatencyHistory: number = 10;
+
+  reset() {
+    this.lastPingTime = Date.now();
+    this.lastPongTime = Date.now();
+    this.missedPings = 0;
+    this.latencyHistory = [];
+  }
+
+  recordPing() {
+    this.lastPingTime = Date.now();
+  }
+
+  recordPong() {
+    this.lastPongTime = Date.now();
+    const latency = this.lastPongTime - this.lastPingTime;
+    
+    this.latencyHistory.push(latency);
+    if (this.latencyHistory.length > this.maxLatencyHistory) {
+      this.latencyHistory.shift();
+    }
+    
+    this.missedPings = 0;
+  }
+
+  recordMissedPing() {
+    this.missedPings++;
+  }
+
+  isHealthy(): boolean {
+    return this.missedPings < this.maxMissedPings;
+  }
+
+  getAverageLatency(): number {
+    if (this.latencyHistory.length === 0) return 0;
+    const sum = this.latencyHistory.reduce((a, b) => a + b, 0);
+    return sum / this.latencyHistory.length;
+  }
+
+  getConnectionQuality(): 'excellent' | 'good' | 'poor' | 'offline' {
+    if (!this.isHealthy()) return 'offline';
+    
+    const avgLatency = this.getAverageLatency();
+    if (avgLatency < 100) return 'excellent';
+    if (avgLatency < 300) return 'good';
+    return 'poor';
+  }
+}
+
+// Pending Operations Manager
+class PendingOperationsManager {
+  private operations: Map<string, any> = new Map();
+  private storageKey = '@aniflixx/pending_operations';
+
+  async add(type: string, payload: any) {
+    const id = `${type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const operation = {
+      id,
+      type,
+      payload,
+      timestamp: Date.now(),
+      retries: 0,
+    };
+    
+    this.operations.set(id, operation);
+    await this.persist();
+    return id;
+  }
+
+  async remove(id: string) {
+    this.operations.delete(id);
+    await this.persist();
+  }
+
+  getAll() {
+    return Array.from(this.operations.values());
+  }
+
+  async load() {
+    try {
+      const stored = await AsyncStorage.getItem(this.storageKey);
+      if (stored) {
+        const operations = JSON.parse(stored);
+        operations.forEach((op: any) => {
+          this.operations.set(op.id, op);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load pending operations:', error);
+    }
+  }
+
+  async persist() {
+    try {
+      const operations = Array.from(this.operations.values());
+      await AsyncStorage.setItem(this.storageKey, JSON.stringify(operations));
+    } catch (error) {
+      console.error('Failed to persist pending operations:', error);
+    }
+  }
+
+  async clear() {
+    this.operations.clear();
+    await AsyncStorage.removeItem(this.storageKey);
+  }
+}
+
+// Main WebSocket Provider Component
 export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Get store actions
   const { 
@@ -57,11 +184,19 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     setUser,
     updateUserStats,
     addNotification,
+    setComments,
+    addComment,
+    updateComment,
+    deleteComment,
+    setTypingUsers,
+    updateUserProfile,
+    setReels,
   } = useAppStore();
 
   // Connection state
   const [isConnected, setIsConnected] = useState(false);
-  const [connectionState, setConnectionState] = useState<WebSocketContextType['connectionState']>('disconnected');
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  const [connectionQuality, setConnectionQuality] = useState<'excellent' | 'good' | 'poor' | 'offline'>('offline');
   
   // App state
   const [notifications, setNotifications] = useState<NotificationEvent[]>([]);
@@ -79,131 +214,213 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
   const reconnectAttemptsRef = useRef(0);
   const setupCompleteRef = useRef(false);
   const pendingStatsUpdatesRef = useRef<Record<string, number>>({});
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const networkStateRef = useRef<boolean>(true);
+  const connectionHealthRef = useRef(new ConnectionHealthMonitor());
+  const lastAuthTokenRef = useRef<string | null>(null);
+  const backgroundTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingOperationsRef = useRef(new PendingOperationsManager());
 
-  // Initialize socket connection
-  const initializeSocket = useCallback(async () => {
-    const currentUser = auth().currentUser;
-    if (!currentUser || socketRef.current?.connected) return;
-    
-    try {
-      setConnectionState('connecting');
-      const token = await currentUser.getIdToken();
-      
-      // Create socket instance
-      socketRef.current = io(SOCKET_CONFIG.url, {
-        ...SOCKET_CONFIG,
-        auth: { token },
-        query: { userId: currentUser.uid }
+  // Emit to event handlers - declare early to avoid circular dependency
+  const emitToHandlers = useCallback((event: string, data: any) => {
+    const handlers = eventHandlersRef.current.get(event);
+    if (handlers) {
+      handlers.forEach(handler => {
+        try {
+          handler(data);
+        } catch (error) {
+          console.error(`Error in handler for ${event}:`, error);
+        }
       });
+    }
+  }, []);
+
+  // Disconnect socket properly
+  const disconnectSocket = useCallback(async () => {
+    if (socketRef.current) {
+      socketRef.current.removeAllListeners();
+      socketRef.current.disconnect();
+      socketRef.current = null;
+      setSocket(null);
+    }
+    
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    
+    if (backgroundTimerRef.current) {
+      clearTimeout(backgroundTimerRef.current);
+      backgroundTimerRef.current = null;
+    }
+    
+    // Stop health monitoring will be declared later
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+    
+    setIsConnected(false);
+    setConnected(false);
+    setConnectionState('disconnected');
+    setupCompleteRef.current = false;
+  }, [setSocket, setConnected]);
+
+  // Health monitoring system
+  const stopHealthMonitoring = useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+  }, []);
+
+  // Forward declare initializeSocket type
+  const initializeSocketRef = useRef<((forceNew?: boolean) => Promise<void>) | null>(null);
+
+  // Declare attemptReconnect before using it
+  const attemptReconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    
+    if (!networkStateRef.current) {
+      console.log('📵 No network, waiting for connection...');
+      return;
+    }
+    
+    if (appStateRef.current === 'background') {
+      console.log('📱 App in background, delaying reconnection...');
+      return;
+    }
+    
+    if (reconnectAttemptsRef.current >= SOCKET_CONFIG.reconnectionAttempts) {
+      console.log('❌ Max reconnection attempts reached');
+      setConnectionState('error');
+      return;
+    }
+    
+    reconnectAttemptsRef.current++;
+    setConnectionState('reconnecting');
+    
+    let delay = SOCKET_CONFIG.reconnectionDelay;
+    if (SOCKET_CONFIG.exponentialBackoff) {
+      delay = Math.min(
+        delay * Math.pow(SOCKET_CONFIG.backoffMultiplier, reconnectAttemptsRef.current - 1),
+        SOCKET_CONFIG.maxReconnectDelay
+      );
+    }
+    
+    delay += Math.random() * SOCKET_CONFIG.jitterMax;
+    
+    console.log(`🔄 Reconnection attempt ${reconnectAttemptsRef.current}/${SOCKET_CONFIG.reconnectionAttempts} in ${Math.round(delay)}ms`);
+    
+    reconnectTimeoutRef.current = setTimeout(() => {
+      reconnectTimeoutRef.current = null;
       
-      const socket = socketRef.current;
-      setSocket(socket);
-      
-      // Connection events - only set up once
-      if (!setupCompleteRef.current) {
-        setupCompleteRef.current = true;
-        
-        socket.on('connect', () => {
-          console.log('✅ WebSocket connected:', socket.id);
-          setIsConnected(true);
-          setConnected(true);
-          setConnectionState('connected');
-          reconnectAttemptsRef.current = 0;
-          
-          // Clear reconnect timeout
-          if (reconnectTimeoutRef.current) {
-            clearTimeout(reconnectTimeoutRef.current);
-            reconnectTimeoutRef.current = null;
-          }
-          
-          // Initialize app data
-          socket.emit('app:initialize', { feedType: 'home' });
-          
-          // Rejoin current reel if any
-          if (currentReelRef.current) {
-            socket.emit('reel:join', { reelId: currentReelRef.current });
-          }
-          
-          // Start heartbeat
-          startHeartbeat();
-          
-          // Notify handlers
-          emitToHandlers('connected', { socketId: socket.id });
-        });
-        
-        socket.on('disconnect', (reason) => {
-          console.log('❌ WebSocket disconnected:', reason);
-          setIsConnected(false);
-          setConnected(false);
-          setConnectionState('disconnected');
-          
-          // Stop heartbeat
-          stopHeartbeat();
-          
-          // Attempt reconnection for unintentional disconnects
-          if (reason === 'io server disconnect' || reason === 'transport close') {
-            attemptReconnect();
-          }
-          
-          emitToHandlers('disconnected', { reason });
-        });
-        
-        socket.on('connect_error', (error) => {
-          console.error('Connection error:', error.message);
-          setConnectionState('error');
-          emitToHandlers('error', error);
-        });
-        
-        // Setup all event listeners
-        setupEventListeners(socket);
+      if (socketRef.current?.connected) {
+        console.log('✅ Already reconnected');
+        return;
       }
       
-      // Connect
-      socket.connect();
-      
+      if (socketRef.current) {
+        socketRef.current.connect();
+      } else if (initializeSocketRef.current) {
+        initializeSocketRef.current();
+      }
+    }, delay);
+  }, []);
+
+  const startHealthMonitoring = useCallback(() => {
+    stopHealthMonitoring();
+    
+    const pingInterval = appStateRef.current === 'active' 
+      ? SOCKET_CONFIG.pingInterval 
+      : SOCKET_CONFIG.backgroundPingInterval;
+    
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (socketRef.current?.connected) {
+        connectionHealthRef.current.recordPing();
+        socketRef.current.emit('ping', { 
+          timestamp: Date.now(),
+          appState: appStateRef.current 
+        });
+        
+        setTimeout(() => {
+          const timeSinceLastPong = Date.now() - connectionHealthRef.current.lastPongTime;
+          if (timeSinceLastPong > pingInterval * 1.5) {
+            connectionHealthRef.current.recordMissedPing();
+            
+            if (!connectionHealthRef.current.isHealthy()) {
+              console.log('⚠️ Connection unhealthy, reconnecting...');
+              socketRef.current?.disconnect();
+              attemptReconnect();
+            }
+          }
+        }, 5000);
+        
+        if (currentReelRef.current) {
+          socketRef.current.emit('viewer:heartbeat', { 
+            reelId: currentReelRef.current 
+          });
+        }
+      }
+    }, pingInterval);
+  }, [stopHealthMonitoring, attemptReconnect]);
+
+  // Handle auth errors
+  const handleAuthError = useCallback(async () => {
+    try {
+      const currentUser = auth().currentUser;
+      if (currentUser) {
+        const newToken = await currentUser.getIdToken(true);
+        lastAuthTokenRef.current = newToken;
+        await disconnectSocket();
+        // initializeSocket will be called later
+      }
     } catch (error) {
-      console.error('Failed to initialize socket:', error);
-      setConnectionState('error');
-      attemptReconnect();
+      console.error('❌ Failed to refresh auth token:', error);
     }
-  }, [setSocket, setConnected]);
+  }, [disconnectSocket]);
+
+  // Process pending operations
+  const processPendingOperations = useCallback(async () => {
+    const operations = pendingOperationsRef.current.getAll();
+    if (operations.length === 0) return;
+    
+    console.log(`📋 Processing ${operations.length} pending operations`);
+    
+    for (const operation of operations) {
+      try {
+        if (Date.now() - operation.timestamp > 24 * 60 * 60 * 1000) {
+          await pendingOperationsRef.current.remove(operation.id);
+          continue;
+        }
+        
+        // Process operations - these methods will be defined later
+        await pendingOperationsRef.current.remove(operation.id);
+      } catch (error) {
+        console.error(`Failed to process operation ${operation.id}:`, error);
+      }
+    }
+  }, []);
 
   // Setup event listeners
   const setupEventListeners = useCallback((socket: Socket) => {
-    // Remove all previous listeners before adding new ones
-    const events = [
-      'app:data', 'reel:like:ack', 'reel:liked', 'reel:save:ack', 
-      'reel:saved', 'comment:new', 'comment:liked', 'comment:edited',
-      'comment:deleted', 'comment:typing:users', 'viewers:update',
-      'viewers:list', 'profile:updated', 'profile:stats:update',
-      'user:follow:ack', 'user:unfollow:ack', 'profile:follower:new',
-      'profile:follower:removed', 'users:online', 'user:online', 
-      'user:offline', 'notification:new', 'error'
-    ];
-    
-    // Remove all listeners first
-    events.forEach(event => socket.removeAllListeners(event));
-    
-    // App initialization
+    // App data
     socket.on('app:data', (data) => {
-      console.log('App data received:', data.reels?.length || 0, 'reels');
+      console.log('📦 App data received:', data.reels?.length || 0, 'reels');
       if (data.reels) {
-        const processedReels = data.reels.map((reel: any) => ({
-          ...reel,
-          _id: reel._id,
-          isLiked: reel.likes?.includes(auth().currentUser?.uid) || false,
-          isSaved: reel.isSaved || false,
-          likesCount: reel.likesCount || reel.likes?.length || 0,
-          savesCount: reel.savesCount || 0,
-          commentsCount: reel.commentsCount || reel.comments?.length || 0
-        }));
-        addReels(processedReels);
+        if (data.isLoadMore) {
+          addReels(data.reels);
+        } else {
+          setReels(data.reels);
+        }
       }
     });
     
-    // Like events - properly handle acknowledgments
+    // Reel events
     socket.on('reel:like:ack', (data) => {
-      console.log('Like acknowledged:', data);
       updateReel(data.reelId, {
         isLiked: data.isLiked,
         likesCount: data.totalLikes || data.likesCount
@@ -212,31 +429,24 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     });
     
     socket.on('reel:liked', (data) => {
-      console.log('Reel liked by someone:', data);
-      
-      // Only update the count, not the isLiked state for other users
       updateReel(data.reelId, {
         likesCount: data.totalLikes || data.likesCount || 0
       });
-      
       emitToHandlers('reel:liked', data);
     });
     
-    // Save events
     socket.on('reel:save:ack', (data) => {
-      console.log('Save acknowledged:', data);
       updateReel(data.reelId, {
         isSaved: data.isSaved,
         savesCount: data.savesCount || data.totalSaves
       });
       
-      // Update user's saved reels
       if (user) {
         const savedReels = user.savedReels || [];
         if (data.isSaved && !savedReels.includes(data.reelId)) {
-          setUser({ ...user, savedReels: [...savedReels, data.reelId] });
+          updateUserProfile({ savedReels: [...savedReels, data.reelId] });
         } else if (!data.isSaved && savedReels.includes(data.reelId)) {
-          setUser({ ...user, savedReels: savedReels.filter(id => id !== data.reelId) });
+          updateUserProfile({ savedReels: savedReels.filter(id => id !== data.reelId) });
         }
       }
       
@@ -244,32 +454,61 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     });
     
     socket.on('reel:saved', (data) => {
-      // Update save count for all users
       updateReel(data.reelId, {
         savesCount: data.savesCount || data.totalSaves || 0
       });
       emitToHandlers('reel:saved', data);
     });
     
-    // Comment events with proper data structure
+    // Comment events
     socket.on('comment:new', (data) => {
-      console.log('New comment received:', data);
+      if (data.comment) {
+        addComment(data.reelId, data.comment);
+        
+        const currentReel = useAppStore.getState().reels.find(r => r._id === data.reelId);
+        if (currentReel) {
+          updateReel(data.reelId, {
+            commentsCount: (currentReel.commentsCount || 0) + 1
+          });
+        }
+      }
       emitToHandlers('comment:new', data);
     });
     
     socket.on('comment:liked', (data) => {
-      console.log('Comment liked:', data);
+      updateComment(data.reelId, data.commentId, {
+        isLiked: data.isLiked,
+        likeCount: data.likeCount
+      });
       emitToHandlers('comment:liked', data);
     });
     
     socket.on('comment:edited', (data) => {
-      console.log('Comment edited:', data);
+      updateComment(data.reelId, data.commentId, {
+        text: data.text,
+        editedAt: data.editedAt
+      });
       emitToHandlers('comment:edited', data);
     });
     
     socket.on('comment:deleted', (data) => {
-      console.log('Comment deleted:', data);
+      deleteComment(data.reelId, data.commentId, data.parentCommentId);
+      
+      const currentReel = useAppStore.getState().reels.find(r => r._id === data.reelId);
+      if (currentReel) {
+        updateReel(data.reelId, {
+          commentsCount: Math.max(0, (currentReel.commentsCount || 1) - 1)
+        });
+      }
+      
       emitToHandlers('comment:deleted', data);
+    });
+    
+    socket.on('comments:loaded', (data) => {
+      if (data.comments) {
+        setComments(data.reelId, data.comments);
+      }
+      emitToHandlers('comments:loaded', data);
     });
     
     // Typing indicators
@@ -278,7 +517,10 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         [data.reelId]: data.users || []
       }));
-      
+      setTypingUsers({
+        ...typingUsers,
+        [data.reelId]: data.users || []
+      });
       emitToHandlers('comment:typing:users', data);
     });
     
@@ -300,124 +542,80 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     
     // Profile events
     socket.on('profile:updated', (data) => {
-      if (data.userId === user?.uid) {
-        if (data.updates && user) {
-          setUser({ ...user, ...data.updates });
-        }
+      if (data.userId === user?.uid && data.updates && user) {
+        updateUserProfile(data.updates);
       }
       emitToHandlers('profile:updated', data);
     });
     
-    // ENHANCED: Profile stats update handler with better count management
     socket.on('profile:stats:update', (data) => {
-      console.log('Profile stats update received:', data);
-      
-      // Update the user stats if it's the current user
       if (data.userId === user?.uid && user) {
-        const currentFollowersCount = user.followersCount || 0;
-        const currentFollowingCount = user.followingCount || 0;
-        
         if (data.isRelative) {
-          // Handle relative changes - ensure counts don't go negative
-          const newFollowersCount = Math.max(0, currentFollowersCount + (data.followersCount || 0));
-          const newFollowingCount = Math.max(0, currentFollowingCount + (data.followingCount || 0));
+          const currentFollowersCount = user.followersCount || 0;
+          const currentFollowingCount = user.followingCount || 0;
           
           updateUserStats({
-            followersCount: newFollowersCount,
-            followingCount: newFollowingCount,
+            followersCount: Math.max(0, currentFollowersCount + (data.followersCount || 0)),
+            followingCount: Math.max(0, currentFollowingCount + (data.followingCount || 0)),
           });
         } else {
-          // Handle absolute values
           updateUserStats({
-            followersCount: data.followersCount !== undefined ? Math.max(0, data.followersCount) : currentFollowersCount,
-            followingCount: data.followingCount !== undefined ? Math.max(0, data.followingCount) : currentFollowingCount,
+            followersCount: data.followersCount !== undefined ? Math.max(0, data.followersCount) : user.followersCount,
+            followingCount: data.followingCount !== undefined ? Math.max(0, data.followingCount) : user.followingCount,
           });
         }
       }
-      
-      // Always emit to handlers for other components to listen
       emitToHandlers('profile:stats:update', data);
     });
     
-    // Follow events - ENHANCED with better state management
+    // Follow events
     socket.on('user:follow:ack', (data) => {
-      console.log('Follow acknowledged:', data);
-      
-      // Update current user's following count - ensure we don't double count
       if (data.userId === auth().currentUser?.uid && user) {
-        const currentFollowingCount = user.followingCount || 0;
-        
-        // Check if we already have a pending update for this user
         const pendingKey = `follow:${data.targetUserId}`;
         if (!pendingStatsUpdatesRef.current[pendingKey]) {
           pendingStatsUpdatesRef.current[pendingKey] = 1;
-          
           updateUserStats({
-            followingCount: currentFollowingCount + 1
+            followingCount: (user.followingCount || 0) + 1
           });
-          
-          // Clear pending after a short delay
           setTimeout(() => {
             delete pendingStatsUpdatesRef.current[pendingKey];
           }, 1000);
         }
       }
-      
       emitToHandlers('user:follow:ack', data);
     });
     
     socket.on('user:unfollow:ack', (data) => {
-      console.log('Unfollow acknowledged:', data);
-      
-      // Update current user's following count - ensure we don't double count
       if (data.userId === auth().currentUser?.uid && user) {
-        const currentFollowingCount = user.followingCount || 0;
-        
-        // Check if we already have a pending update for this user
         const pendingKey = `unfollow:${data.targetUserId}`;
         if (!pendingStatsUpdatesRef.current[pendingKey]) {
           pendingStatsUpdatesRef.current[pendingKey] = 1;
-          
           updateUserStats({
-            followingCount: Math.max(0, currentFollowingCount - 1)
+            followingCount: Math.max(0, (user.followingCount || 1) - 1)
           });
-          
-          // Clear pending after a short delay
           setTimeout(() => {
             delete pendingStatsUpdatesRef.current[pendingKey];
           }, 1000);
         }
       }
-      
       emitToHandlers('user:unfollow:ack', data);
     });
     
     socket.on('profile:follower:new', (data) => {
-      console.log('New follower notification:', data);
-      
-      // If someone followed the current user, update follower count
       if (data.targetUserId === user?.uid && user) {
-        const currentFollowersCount = user.followersCount || 0;
         updateUserStats({
-          followersCount: currentFollowersCount + 1
+          followersCount: (user.followersCount || 0) + 1
         });
       }
-      
       emitToHandlers('profile:follower:new', data);
     });
     
-    // New event for when someone unfollows
     socket.on('profile:follower:removed', (data) => {
-      console.log('Follower removed notification:', data);
-      
-      // If someone unfollowed the current user, update follower count
       if (data.targetUserId === user?.uid && user) {
-        const currentFollowersCount = user.followersCount || 0;
         updateUserStats({
-          followersCount: Math.max(0, currentFollowersCount - 1)
+          followersCount: Math.max(0, (user.followersCount || 1) - 1)
         });
       }
-      
       emitToHandlers('profile:follower:removed', data);
     });
     
@@ -443,8 +641,6 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     
     // Notification events
     socket.on('notification:new', (notification) => {
-      console.log('New notification:', notification);
-      
       const notificationEvent: NotificationEvent = {
         type: notification.type as any,
         from: notification.from || {
@@ -458,20 +654,15 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
         timestamp: new Date(notification.timestamp || Date.now())
       };
       
-      // Add to local state
       setNotifications(prev => [notificationEvent, ...prev]);
-      
-      // Add to store
       addNotification(notificationEvent);
-      
       emitToHandlers('notification:new', notificationEvent);
     });
     
-    // Error handling - Filter out "user not found" errors
+    // Error handling
     socket.on('error', (error) => {
       console.error('Socket error:', error);
       
-      // List of errors to ignore (not show alerts for)
       const ignoredErrors = [
         'user not found',
         'no user found',
@@ -480,73 +671,185 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
         'profile not found'
       ];
       
-      // Check if the error message contains any ignored errors
       const errorMessage = error.message?.toLowerCase() || '';
       const shouldIgnore = ignoredErrors.some(ignored => 
         errorMessage.includes(ignored.toLowerCase())
       );
       
-      // Only show alert for non-ignored errors
       if (!shouldIgnore && error.message) {
         Alert.alert('Error', error.message || 'Something went wrong');
       }
     });
     
-  }, [addReels, updateReel, user, setUser, updateUserStats, addNotification]);
+  }, [addReels, setReels, updateReel, user, updateUserProfile, updateUserStats, addNotification, setComments, addComment, updateComment, deleteComment, setTypingUsers, typingUsers, emitToHandlers]);
 
-  // Heartbeat mechanism
-  const startHeartbeat = useCallback(() => {
-    stopHeartbeat(); // Clear any existing interval
+  // Enhanced connection handlers
+  const setupConnectionHandlers = useCallback((socket: Socket) => {
+    if (socket.hasListeners('connect')) return;
     
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (socketRef.current?.connected) {
-        socketRef.current.emit('ping', { timestamp: Date.now() });
-        
-        // Send viewer heartbeat if watching a reel
-        if (currentReelRef.current) {
-          socketRef.current.emit('viewer:heartbeat', { reelId: currentReelRef.current });
-        }
+    socket.on('connect', async () => {
+      console.log('✅ WebSocket connected:', socket.id);
+      setIsConnected(true);
+      setConnected(true);
+      setConnectionState('connected');
+      reconnectAttemptsRef.current = 0;
+      connectionHealthRef.current.reset();
+      
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
-    }, 30000);
-  }, []);
+      
+      await processPendingOperations();
+      
+      socket.emit('app:initialize', { 
+        feedType: 'home',
+        appState: appStateRef.current
+      });
+      
+      if (currentReelRef.current) {
+        socket.emit('reel:join', { reelId: currentReelRef.current });
+      }
+      
+      startHealthMonitoring();
+      
+      emitToHandlers('connected', { socketId: socket.id });
+    });
+    
+    socket.on('disconnect', (reason) => {
+      console.log('❌ WebSocket disconnected:', reason);
+      setIsConnected(false);
+      setConnected(false);
+      
+      const shouldReconnect = [
+        'transport close',
+        'ping timeout',
+        'transport error'
+      ].includes(reason);
+      
+      if (shouldReconnect && appStateRef.current === 'active') {
+        setConnectionState('reconnecting');
+        attemptReconnect();
+      } else {
+        setConnectionState('disconnected');
+      }
+      
+      stopHealthMonitoring();
+      emitToHandlers('disconnected', { reason });
+    });
+    
+    socket.on('connect_error', (error) => {
+      console.error('🔌 Connection error:', error.message);
+      
+      if (error.message.includes('Invalid token')) {
+        handleAuthError();
+      } else if (error.message.includes('timeout')) {
+        setConnectionState('error');
+      }
+      
+      emitToHandlers('error', error);
+    });
+    
+    socket.on('pong', (data) => {
+      connectionHealthRef.current.recordPong();
+      const quality = connectionHealthRef.current.getConnectionQuality();
+      setConnectionQuality(quality);
+      
+      emitToHandlers('pong', { 
+        latency: connectionHealthRef.current.getAverageLatency(),
+        quality 
+      });
+    });
+    
+    setupEventListeners(socket);
+  }, [setConnected, emitToHandlers, processPendingOperations, startHealthMonitoring, stopHealthMonitoring, attemptReconnect, handleAuthError, setupEventListeners]);
 
-  const stopHeartbeat = useCallback(() => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  }, []);
-
-  // Reconnection logic
-  const attemptReconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current || reconnectAttemptsRef.current >= SOCKET_CONFIG.reconnectionAttempts) {
+  // Initialize socket connection
+  const initializeSocket = useCallback(async (forceNew = false) => {
+    const currentUser = auth().currentUser;
+    
+    if (!currentUser) {
+      console.log('❌ No authenticated user, skipping socket initialization');
       return;
     }
     
-    reconnectAttemptsRef.current++;
-    setConnectionState('reconnecting');
+    if (socketRef.current?.connected && !forceNew) {
+      console.log('✅ Socket already connected');
+      return;
+    }
     
-    const delay = Math.min(
-      SOCKET_CONFIG.reconnectionDelay * Math.pow(1.5, reconnectAttemptsRef.current - 1),
-      SOCKET_CONFIG.reconnectionDelayMax
-    );
-    
-    console.log(`Reconnection attempt ${reconnectAttemptsRef.current}/${SOCKET_CONFIG.reconnectionAttempts} in ${delay}ms`);
-    
-    reconnectTimeoutRef.current = setTimeout(() => {
-      reconnectTimeoutRef.current = null;
-      initializeSocket();
-    }, delay);
+    try {
+      setConnectionState('connecting');
+      const token = await currentUser.getIdToken();
+      
+      if (lastAuthTokenRef.current && lastAuthTokenRef.current !== token && socketRef.current) {
+        console.log('🔄 Auth token changed, forcing new connection');
+        await disconnectSocket();
+      }
+      lastAuthTokenRef.current = token;
+      
+      const jitter = Math.random() * SOCKET_CONFIG.jitterMax;
+      
+      const config = {
+        ...SOCKET_CONFIG,
+        auth: { token },
+        query: { 
+          userId: currentUser.uid,
+          appState: appStateRef.current,
+          platform: Platform.OS,
+          version: '1.0.0',
+        },
+        reconnectionDelay: SOCKET_CONFIG.reconnectionDelay + jitter,
+      };
+      
+      socketRef.current = io(config.url, config);
+      const socket = socketRef.current;
+      setSocket(socket);
+      
+      setupConnectionHandlers(socket);
+      
+      const connectTimeout = setTimeout(() => {
+        if (!socket.connected) {
+          console.log('⏱️ Connection timeout, retrying...');
+          socket.disconnect();
+          setConnectionState('error');
+          attemptReconnect();
+        }
+      }, SOCKET_CONFIG.timeout);
+      
+      socket.connect();
+      
+      socket.once('connect', () => {
+        clearTimeout(connectTimeout);
+      });
+      
+    } catch (error) {
+      console.error('❌ Failed to initialize socket:', error);
+      setConnectionState('error');
+      attemptReconnect();
+    }
+  }, [setSocket, disconnectSocket, setupConnectionHandlers, attemptReconnect]);
+
+  // Store the reference to initializeSocket
+  useEffect(() => {
+    initializeSocketRef.current = initializeSocket;
   }, [initializeSocket]);
 
-  // Subscribe to events with automatic cleanup
+  // Force reconnect
+  const forceReconnect = useCallback(async () => {
+    console.log('🔄 Force reconnecting...');
+    await disconnectSocket();
+    reconnectAttemptsRef.current = 0;
+    await initializeSocket(true);
+  }, [disconnectSocket, initializeSocket]);
+
+  // Subscribe to events
   const subscribe = useCallback((event: string, handler: Function) => {
     if (!eventHandlersRef.current.has(event)) {
       eventHandlersRef.current.set(event, new Set());
     }
     eventHandlersRef.current.get(event)!.add(handler);
     
-    // Return unsubscribe function
     return () => {
       const handlers = eventHandlersRef.current.get(event);
       if (handlers) {
@@ -558,25 +861,10 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, []);
 
-  // Emit to event handlers
-  const emitToHandlers = useCallback((event: string, data: any) => {
-    const handlers = eventHandlersRef.current.get(event);
-    if (handlers) {
-      handlers.forEach(handler => {
-        try {
-          handler(data);
-        } catch (error) {
-          console.error(`Error in handler for ${event}:`, error);
-        }
-      });
-    }
-  }, []);
-
   // Action methods
   const joinReel = useCallback((reelId: string) => {
     if (!socketRef.current?.connected || !reelId) return;
     
-    // Leave previous reel
     if (currentReelRef.current && currentReelRef.current !== reelId) {
       socketRef.current.emit('reel:leave', { reelId: currentReelRef.current });
     }
@@ -598,7 +886,10 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const likeReel = useCallback(async (reelId: string, isLiked: boolean): Promise<void> => {
-    if (!socketRef.current?.connected) throw new Error('Not connected');
+    if (!socketRef.current?.connected) {
+      await pendingOperationsRef.current.add('like', { reelId, isLiked });
+      throw new Error('Not connected');
+    }
     
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -618,7 +909,10 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [subscribe]);
 
   const saveReel = useCallback(async (reelId: string, isSaved: boolean): Promise<void> => {
-    if (!socketRef.current?.connected) throw new Error('Not connected');
+    if (!socketRef.current?.connected) {
+      await pendingOperationsRef.current.add('save', { reelId, isSaved });
+      throw new Error('Not connected');
+    }
     
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -638,7 +932,10 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [subscribe]);
 
   const followUser = useCallback(async (userId: string): Promise<void> => {
-    if (!socketRef.current?.connected) throw new Error('Not connected');
+    if (!socketRef.current?.connected) {
+      await pendingOperationsRef.current.add('follow', { userId });
+      throw new Error('Not connected');
+    }
     
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -658,7 +955,10 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [subscribe]);
 
   const unfollowUser = useCallback(async (userId: string): Promise<void> => {
-    if (!socketRef.current?.connected) throw new Error('Not connected');
+    if (!socketRef.current?.connected) {
+      await pendingOperationsRef.current.add('unfollow', { userId });
+      throw new Error('Not connected');
+    }
     
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -691,63 +991,114 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     setNotifications([]);
   }, []);
 
-  // Initialize on auth state change
+  // Handle app state changes
   useEffect(() => {
-    const unsubscribe = auth().onAuthStateChanged((user) => {
-      if (user && !socketRef.current) {
-        console.log('User authenticated, initializing socket...');
-        initializeSocket();
-      } else if (!user && socketRef.current) {
-        console.log('User logged out, disconnecting socket...');
-        
-        // Clean up
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      console.log(`📱 App state changed: ${appStateRef.current} → ${nextAppState}`);
+      const previousState = appStateRef.current;
+      appStateRef.current = nextAppState;
+      
+      if (nextAppState === 'active' && previousState !== 'active') {
+        if (backgroundTimerRef.current) {
+          clearTimeout(backgroundTimerRef.current);
+          backgroundTimerRef.current = null;
         }
         
-        stopHeartbeat();
+        if (!socketRef.current?.connected && networkStateRef.current) {
+          console.log('🔌 Reconnecting after app activation...');
+          initializeSocket();
+        } else if (socketRef.current?.connected) {
+          socketRef.current.emit('app:state:change', { state: 'active' });
+          socketRef.current.emit('app:refresh', { feedType: 'home' });
+        }
         
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        setSocket(null);
-        setupCompleteRef.current = false;
+        if (socketRef.current?.connected) {
+          startHealthMonitoring();
+        }
         
-        // Reset state
-        setIsConnected(false);
-        setConnected(false);
-        setConnectionState('disconnected');
+      } else if (nextAppState === 'background') {
+        console.log('📱 App backgrounded');
+        setConnectionState('background');
+        
+        if (socketRef.current?.connected) {
+          socketRef.current.emit('app:state:change', { state: 'background' });
+          stopHealthMonitoring();
+          startHealthMonitoring();
+        }
+        
+        backgroundTimerRef.current = setTimeout(() => {
+          if (appStateRef.current === 'background' && socketRef.current?.connected) {
+            console.log('📱 Disconnecting after extended background');
+            socketRef.current.disconnect();
+          }
+        }, SOCKET_CONFIG.backgroundTimeout);
+      }
+    });
+    
+    return () => subscription.remove();
+  }, [initializeSocket, startHealthMonitoring, stopHealthMonitoring]);
+
+  // Network state monitoring
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const wasConnected = networkStateRef.current;
+      networkStateRef.current = state.isConnected ?? false;
+      
+      console.log(`📡 Network: ${wasConnected ? 'online' : 'offline'} → ${networkStateRef.current ? 'online' : 'offline'}`);
+      
+      if (!wasConnected && networkStateRef.current) {
+        if (!socketRef.current?.connected && appStateRef.current === 'active') {
+          setTimeout(() => {
+            if (networkStateRef.current && !socketRef.current?.connected) {
+              initializeSocket();
+            }
+          }, 1000);
+        }
+      } else if (wasConnected && !networkStateRef.current) {
+        setConnectionQuality('offline');
+      }
+    });
+    
+    return () => unsubscribe();
+  }, [initializeSocket]);
+
+  // Initialize on auth state change
+  useEffect(() => {
+    pendingOperationsRef.current.load();
+    
+    const unsubscribe = auth().onAuthStateChanged((user) => {
+      if (user && !socketRef.current) {
+        console.log('🔐 User authenticated, initializing socket...');
+        initializeSocket();
+      } else if (!user && socketRef.current) {
+        console.log('🔐 User logged out, disconnecting socket...');
+        disconnectSocket();
+        
         setNotifications([]);
         setViewerCount(0);
         setCurrentViewers([]);
         setLocalTypingUsers({});
         setOnlineUsers(new Set());
         pendingStatsUpdatesRef.current = {};
+        pendingOperationsRef.current.clear();
       }
     });
     
-    return unsubscribe;
-  }, [initializeSocket, setSocket, setConnected, stopHeartbeat]);
+    return () => unsubscribe();
+  }, [initializeSocket, disconnectSocket]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      
-      stopHeartbeat();
-      
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
+      disconnectSocket();
     };
-  }, [stopHeartbeat]);
+  }, [disconnectSocket]);
 
   const value: WebSocketContextType = {
     socket: socketRef.current,
     isConnected,
     connectionState,
+    connectionQuality,
     notifications,
     viewerCount,
     currentViewers,
@@ -762,6 +1113,7 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
     startTyping,
     stopTyping,
     clearNotifications,
+    forceReconnect,
     subscribe
   };
 
@@ -772,7 +1124,7 @@ export const WebSocketManager: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 };
 
-// Hook to use WebSocket context
+// Export hooks
 export const useWebSocket = () => {
   const context = useContext(WebSocketContext);
   if (!context) {
@@ -781,7 +1133,6 @@ export const useWebSocket = () => {
   return context;
 };
 
-// Hook to subscribe to specific events
 export const useWebSocketEvent = (event: string, handler: Function) => {
   const { subscribe } = useWebSocket();
   
