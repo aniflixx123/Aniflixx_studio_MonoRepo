@@ -1,0 +1,13 @@
+trigger:
+  branches:
+    include:
+      - main
+      - master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- script: |
+    curl -X POST "$(https://api.render.com/deploy/srv-cvi90jnnoe9s739rrltg?key=29DRmUFPdR4)"
+  displayName: 'Deploy to Render'
