@@ -1,0 +1,16 @@
+name = "studio-dashboard-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+CLERK_SECRET_KEY = "sk_test_0qvJ5USlKCuvuD1zYLSpzpkhUwtCOauMypB6w1EIdp"
+ENVIRONMENT = "development"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "studio-db"
+database_id = "dc710957-8e2e-40d9-a3e8-ff5970bc46fb"
+
+[[r2_buckets]]
+binding = "CONTENT"
+bucket_name = "aniflixx-content"

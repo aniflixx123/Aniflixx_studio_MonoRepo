@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS team_members;
+DROP TABLE IF EXISTS episodes;
+DROP TABLE IF EXISTS seasons;
+DROP TABLE IF EXISTS series;
+DROP TABLE IF EXISTS analytics_usage;
+DROP TABLE IF EXISTS content;
+DROP TABLE IF EXISTS studios;

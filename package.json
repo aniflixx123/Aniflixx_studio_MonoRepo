@@ -1,0 +1,7 @@
+{
+  "name": "aniflixx",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}
