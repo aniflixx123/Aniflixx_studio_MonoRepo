@@ -45,7 +45,21 @@ series.post('/', async (c) => {
   }
 
   const body = await c.req.json()
-  const { title, title_english, title_japanese, type, description, genres, tags } = body
+  const { 
+    title, 
+    title_english, 
+    title_japanese, 
+    type, 
+    description, 
+    genres, 
+    tags,
+    // Manga/Webtoon specific fields
+    author_name,
+    artist_name,
+    default_reading_mode,
+    default_reading_direction,
+    color_type
+  } = body
 
   try {
     // Get studio
@@ -65,8 +79,10 @@ series.post('/', async (c) => {
     const result = await c.env.DB.prepare(`
       INSERT INTO series (
         studio_id, title, title_english, title_japanese, 
-        type, description, genres, tags, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+        type, description, genres, tags, status,
+        author_name, artist_name, default_reading_mode, 
+        default_reading_direction, color_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
       RETURNING *
     `).bind(
       studio.id,
@@ -76,7 +92,12 @@ series.post('/', async (c) => {
       type,
       description || null,
       JSON.stringify(genres || []),
-      JSON.stringify(tags || [])
+      JSON.stringify(tags || []),
+      author_name || null,
+      artist_name || null,
+      default_reading_mode || (type === 'webtoon' ? 'vertical' : 'paged'),
+      default_reading_direction || 'ltr',
+      color_type || 'full_color'
     ).first()
 
     return c.json(result)

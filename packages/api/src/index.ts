@@ -11,6 +11,7 @@ import regionRoutes from './routes/regions'
 import monetizationRoutes from './routes/monetization'
 import analyticsRoutes from './routes/analytics'
 import scheduleRoutes from './routes/schedule'
+import readingRoutes from './routes/reading'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -38,6 +39,7 @@ app.route('/api/regions', regionRoutes)
 app.route('/api/monetization', monetizationRoutes)
 app.route('/api/analytics', analyticsRoutes)
 app.route('/api/schedule', scheduleRoutes)
+app.route('/api/reading', readingRoutes)
 
 // 404 handler
 app.notFound((c) => {
