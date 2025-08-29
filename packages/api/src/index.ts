@@ -13,6 +13,7 @@ import monetizationRoutes from './routes/monetization'
 import analyticsRoutes from './routes/analytics'
 import scheduleRoutes from './routes/schedule'
 import readingRoutes from './routes/reading'
+import mobile from './routes/mobile' // Public routes for mobile app
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -47,6 +48,7 @@ app.route('/api/upload', uploadRoutes)
 app.route('/api/monetization', monetizationRoutes)
 app.route('/api/analytics', analyticsRoutes)
 app.route('/api/reading', readingRoutes)
+app.route('/api/mobile', mobile)// Public routes for mobile app
 
 // These need special handling for nested routes
 app.route('/api', regionRoutes) // Handles /api/episodes/:id/regions and /api/series/:id/regions

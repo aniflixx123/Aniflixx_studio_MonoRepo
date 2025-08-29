@@ -190,7 +190,7 @@ export default function EpisodeCard({ episode, seriesType }: EpisodeCardProps) {
                       
                       {pageCount > 0 && (
                         <Link
-                          href={`/content/${episode.series_id}/chapters/${episode.id}/manage`}
+                          href={`/content/${episode.series_id}/chapter/${episode.id}/manage`}
                           className="block px-4 py-2 hover:bg-gray-100 text-sm"
                           onClick={() => setShowActions(false)}
                         >
