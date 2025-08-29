@@ -1,3 +1,4 @@
+// packages/dashboard/src/app/(dashboard)/content/[id]/page.tsx
 import { auth } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
@@ -12,8 +13,8 @@ type Series = {
   type: 'anime' | 'manga' | 'webtoon' | 'light_novel'
   status: string
   description?: string
-  genres?: string[]
-  tags?: string[]
+  genres?: string
+  tags?: string
   content_rating?: string
   target_audience?: string
   is_premium: boolean
@@ -41,6 +42,7 @@ type Episode = {
   title: string
   description?: string
   video_path: string
+  page_count?: number
   video_quality?: string
   file_size?: number
   duration?: number
@@ -62,20 +64,18 @@ type Episode = {
 async function getSeriesDetails(id: string, orgId: string): Promise<Series | null> {
   try {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/series/${id}?orgId=${orgId}`,
+      `${process.env.NEXT_PUBLIC_API_URL}/api/series/${id}`,
       {
         headers: {
-          'X-Org-Id': orgId,
+          'X-Org-Id': orgId
         },
         cache: 'no-store'
       }
     )
     
-    if (!response.ok) {
-      return null
-    }
+    if (!response.ok) return null
     
-    const data :any= await response.json()
+    const data:any = await response.json()
     
     // Parse JSON fields if they're strings
     if (typeof data.genres === 'string') {
@@ -105,33 +105,17 @@ async function getEpisodes(seriesId: string): Promise<Episode[]> {
   try {
     const response = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL}/api/series/${seriesId}/episodes`,
-      {
-        cache: 'no-store'
-      }
+      { cache: 'no-store' }
     )
     
-    if (!response.ok) {
-      return []
-    }
+    if (!response.ok) return []
     
-    const data:any = await response.json()
-    return data.episodes || []
+    const data = await response.json()
+    return Array.isArray(data) ? data : []
   } catch (error) {
     console.error('Error fetching episodes:', error)
     return []
   }
-}
-
-function getStatusColor(status: string) {
-  const colors = {
-    draft: 'text-gray-600 bg-gray-100',
-    published: 'text-green-600 bg-green-100',
-    completed: 'text-blue-600 bg-blue-100',
-    hiatus: 'text-yellow-600 bg-yellow-100',
-    cancelled: 'text-red-600 bg-red-100',
-    archived: 'text-gray-600 bg-gray-100'
-  }
-  return colors[status as keyof typeof colors] || colors.draft
 }
 
 function getTypeIcon(type: string) {
@@ -139,11 +123,11 @@ function getTypeIcon(type: string) {
     case 'anime':
       return '🎬'
     case 'manga':
-      return '📚'
+      return '📖'
     case 'webtoon':
       return '📱'
     case 'light_novel':
-      return '📖'
+      return '📚'
     default:
       return '📺'
   }
@@ -174,6 +158,10 @@ export default async function SeriesDetailPage({
   const scheduledEpisodes = episodes.filter(ep => ep.status === 'scheduled').length
   const totalViews = episodes.reduce((sum, ep) => sum + (ep.view_count || 0), 0)
   
+  // Parse genres and tags if they're strings
+  const genres = Array.isArray(series.genres) ? series.genres : []
+  const tags = Array.isArray(series.tags) ? series.tags : []
+  
   return (
     <div className="p-8 max-w-7xl mx-auto">
       {/* Back Navigation */}
@@ -203,52 +191,63 @@ export default async function SeriesDetailPage({
               </div>
             </div>
             
-            <div className="flex items-center gap-3 mb-4">
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(series.status)}`}>
-                {series.status.charAt(0).toUpperCase() + series.status.slice(1)}
+            {/* Status Badges */}
+            <div className="flex gap-2 mb-4">
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                series.status === 'published' ? 'bg-green-100 text-green-800' :
+                series.status === 'draft' ? 'bg-gray-100 text-gray-800' :
+                series.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                series.status === 'hiatus' ? 'bg-yellow-100 text-yellow-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                {series.status}
               </span>
-              <span className="text-gray-600">•</span>
-              <span className="text-gray-600 capitalize">{series.type}</span>
-              {series.content_rating && (
-                <>
-                  <span className="text-gray-600">•</span>
-                  <span className="px-2 py-1 bg-gray-100 rounded text-sm">{series.content_rating}</span>
-                </>
-              )}
+              <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
+                {series.type.replace('_', ' ')}
+              </span>
               {series.is_premium && (
-                <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-sm font-medium">
+                <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm">
                   Premium
                 </span>
               )}
               {series.is_featured && (
-                <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-medium">
+                <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm">
                   Featured
                 </span>
               )}
               {series.is_exclusive && (
-                <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-sm font-medium">
+                <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm">
                   Exclusive
                 </span>
               )}
             </div>
             
+            {/* Description */}
             {series.description && (
-              <p className="text-gray-700 mb-4 max-w-4xl">{series.description}</p>
+              <p className="text-gray-700 mb-4">{series.description}</p>
             )}
             
-            {/* Genres and Tags */}
-            <div className="flex flex-wrap gap-2 mb-4">
-              {series.genres && series.genres.length > 0 && series.genres.map((genre, index) => (
-                <span key={index} className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm">
-                  {genre}
-                </span>
-              ))}
-              {series.tags && series.tags.length > 0 && series.tags.map((tag, index) => (
-                <span key={index} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
-                  #{tag}
-                </span>
-              ))}
-            </div>
+            {/* Genres */}
+            {genres.length > 0 && (
+              <div className="flex gap-2 flex-wrap mb-4">
+                {genres.map((genre: string, index: number) => (
+                  <span key={index} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                    {genre}
+                  </span>
+                ))}
+              </div>
+            )}
+            
+            {/* Tags */}
+            {tags.length > 0 && (
+              <div className="flex gap-2 flex-wrap mb-4">
+                {tags.map((tag: string, index: number) => (
+                  <span key={index} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
             
             {/* Release Schedule */}
             {series.release_schedule && series.release_schedule !== 'completed' && (
@@ -269,7 +268,7 @@ export default async function SeriesDetailPage({
         {/* Stats Bar */}
         <div className="grid grid-cols-5 gap-4 p-4 bg-gray-50 rounded-lg">
           <div>
-            <p className="text-sm text-gray-600">Total Episodes</p>
+            <p className="text-sm text-gray-600">Total {series.type === 'anime' ? 'Episodes' : 'Chapters'}</p>
             <p className="text-2xl font-bold">{episodes.length}</p>
           </div>
           <div>
@@ -296,7 +295,7 @@ export default async function SeriesDetailPage({
         <div className="border-t mt-6 pt-4">
           <div className="flex gap-6">
             <button className="font-medium text-blue-600 border-b-2 border-blue-600 pb-2">
-              Episodes
+              {series.type === 'anime' ? 'Episodes' : 'Chapters'}
             </button>
             <Link 
               href={`/content/${id}/regional`}
