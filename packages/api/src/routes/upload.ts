@@ -68,7 +68,7 @@ upload.post('/episode', async (c) => {
   }
 })
 
-// Upload manga/webtoon chapter with multiple images
+// packages/api/src/routes/upload.ts
 upload.post('/chapter', async (c) => {
   const orgId = c.req.header('X-Org-Id')
   if (!orgId) {
@@ -77,96 +77,59 @@ upload.post('/chapter', async (c) => {
 
   try {
     const formData = await c.req.formData()
-    const seriesId = formData.get('seriesId') as string
-    const chapterNumber = formData.get('chapterNumber') as string
-    const chapterTitle = formData.get('chapterTitle') as string
-    const description = formData.get('description') as string
-    const totalPages = parseInt(formData.get('totalPages') as string)
-
-    // Validate input
-    const validation = validateChapterUpload(seriesId, chapterNumber, chapterTitle, totalPages)
-    if (!validation.valid) {
-      return c.json({ error: 'Validation failed', errors: validation.errors }, 400)
+    const seriesId = formData.get('series_id') as string
+    const episodeNumber = formData.get('episode_number') as string
+    const title = formData.get('title') as string
+    
+    const pageFiles: File[] = []
+    for (const [key, value] of formData.entries()) {
+      if (key.startsWith('page_') && value instanceof File) {
+        pageFiles.push(value)
+      }
     }
 
-    const pageMetadata: PageMetadata[] = []
-    const basePath = `studios/${orgId}/series/${seriesId}/chapter-${chapterNumber}`
-
-    // Process each page
-    for (let i = 0; i < totalPages; i++) {
-      const pageFile = formData.get(`page_${i}`) as File
+    // Upload to R2 and collect paths
+    const pagePaths: string[] = []
+    
+    for (let i = 0; i < pageFiles.length; i++) {
+      const file:any = pageFiles[i]
+      const path = `manga/series/${seriesId}/chapter-${episodeNumber}/page-${i + 1}.jpg`
       
-      if (!pageFile) {
-        return c.json({ error: `Missing page ${i + 1}` }, 400)
-      }
-
-      // Validate image
-      const fileValidation = validateImageFile(pageFile)
-      if (!fileValidation.valid) {
-        return c.json({ 
-          error: `Page ${i + 1} validation failed`, 
-          details: fileValidation.error 
-        }, 400)
-      }
-
-      // For now, upload original only and use CDN resizing
-      // Later you can add actual image processing
-      const originalPath = `${basePath}/page-${i + 1}.jpg`
-      
-      await c.env.CONTENT.put(
-        originalPath,
-        await pageFile.arrayBuffer(),
-        { httpMetadata: { contentType: pageFile.type } }
-      )
-      
-      // Generate CDN URLs with resize parameters
-      const { generateResponsiveUrls } = await import('../utils/image')
-      const cdnBaseUrl = `https://cdn.aniflixx.com/${originalPath}`
-      const urls = generateResponsiveUrls(cdnBaseUrl)
-
-      pageMetadata.push({
-        number: i + 1,
-        original: originalPath,
-        mobile: urls.mobile,
-        thumbnail: urls.thumbnail,
-        size: pageFile.size
+      await c.env.CONTENT.put(path, file.stream(), {
+        httpMetadata: {
+          contentType: file.type || 'image/jpeg'
+        }
       })
+      
+      // Store ONLY the path
+      pagePaths.push(path)
     }
 
-    // Save to database
-    const episodeResult = await c.env.DB.prepare(`
+    // Create or update episode with page paths
+    const episodeId = formData.get('episode_id') as string || crypto.randomUUID()
+    
+    const result = await c.env.DB.prepare(`
       INSERT INTO episodes (
-        series_id,
-        episode_number, 
-        title, 
-        description, 
-        video_path,
-        page_count,
-        status
+        id, series_id, episode_number, title, video_path, page_count, status
       ) VALUES (?, ?, ?, ?, ?, ?, 'draft')
-      RETURNING id
+      ON CONFLICT(id) DO UPDATE SET
+        video_path = excluded.video_path,
+        page_count = excluded.page_count,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
     `).bind(
+      episodeId,
       seriesId,
-      parseInt(chapterNumber),
-      chapterTitle,
-      description || null,
-      JSON.stringify({ pages: pageMetadata }),
-      totalPages
+      parseInt(episodeNumber),
+      title,
+      JSON.stringify(pagePaths), // Clean array of paths
+      pagePaths.length
     ).first()
 
-    return c.json({ 
-      success: true,
-      chapterId: episodeResult?.id,
-      totalPages: pageMetadata.length,
-      message: `Chapter ${chapterNumber} uploaded successfully`
-    })
-
+    return c.json({ success: true, episode: result })
   } catch (error) {
-    console.error('Chapter upload error:', error)
-    return c.json({ 
-      error: 'Upload failed', 
-      details: error instanceof Error ? error.message : 'Unknown error' 
-    }, 500)
+    console.error('Upload error:', error)
+    return c.json({ error: 'Upload failed' }, 500)
   }
 })
 

@@ -33,7 +33,7 @@ const transformSeries = (series: any, baseUrl: string) => {
   };
 }
 
-// Helper to transform episode/chapter data with full URLs
+// packages/api/src/routes/mobile.ts - in transformEpisode function
 const transformEpisode = (episode: any, baseUrl: string) => {
   if (!episode) return null;
   
@@ -42,32 +42,26 @@ const transformEpisode = (episode: any, baseUrl: string) => {
     thumbnail: constructImageUrl(baseUrl, episode.thumbnail),
   };
   
-  // Parse video_path for manga/webtoon pages
+  // Handle manga/webtoon pages
   if (episode.video_path && episode.type !== 'anime') {
     try {
-      let pages = [];
+      const parsed = JSON.parse(episode.video_path);
       
-      if (typeof episode.video_path === 'string') {
-        if (episode.video_path.startsWith('[')) {
-          pages = JSON.parse(episode.video_path);
-        } else {
-          pages = [episode.video_path];
-        }
-      } else if (Array.isArray(episode.video_path)) {
-        pages = episode.video_path;
+      // If it's an array of paths (correct format)
+      if (Array.isArray(parsed)) {
+        transformed.pages = parsed.map((path: string) => {
+          // Convert to full URL
+          return `${baseUrl}/api/files/${path}`;
+        });
       }
-      
-      // Convert page paths to full URLs
-      transformed.pages = pages.map((page: string) => constructImageUrl(baseUrl, page));
-      
     } catch (e) {
-      console.error('Failed to parse pages:', e);
+      console.error('Failed to parse video_path:', e);
       transformed.pages = [];
     }
   }
   
   return transformed;
-}
+};
 
 // Get series list (public, no auth required)
 mobile.get('/series', async (c) => {
