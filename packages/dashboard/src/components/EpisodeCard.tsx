@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import ScheduleModal from './ScheduleModal'
 import EditEpisodeModal from './EditEpisodeModal'
 
@@ -54,11 +55,13 @@ export default function EpisodeCard({ episode, seriesType }: EpisodeCardProps) {
   }
 
   const getStatusBadge = () => {
-    const colors:any = {
+    const colors: any = {
       draft: 'bg-gray-100 text-gray-800',
       scheduled: 'bg-yellow-100 text-yellow-800',
       published: 'bg-green-100 text-green-800',
-      hidden: 'bg-red-100 text-red-800'
+      hidden: 'bg-red-100 text-red-800',
+      processing: 'bg-blue-100 text-blue-800',
+      archived: 'bg-gray-100 text-gray-500'
     }
     
     return (
@@ -68,17 +71,26 @@ export default function EpisodeCard({ episode, seriesType }: EpisodeCardProps) {
     )
   }
 
-  // Parse video_path to check if it's manga (JSON array)
-  let pageCount = 0
-  let isChapter = false
-  try {
-    if (episode.video_path && episode.video_path.startsWith('[')) {
-      const pages = JSON.parse(episode.video_path)
-      pageCount = pages.length
-      isChapter = true
+  // Parse video_path to check if it's manga/webtoon
+  let pageCount = episode.page_count || 0
+  let isChapter = seriesType === 'manga' || seriesType === 'webtoon'
+  
+  // If page_count not set, try to parse from video_path
+  if (!pageCount && episode.video_path && isChapter) {
+    try {
+      if (episode.video_path.startsWith('[')) {
+        // Old format: array of paths
+        const pages = JSON.parse(episode.video_path)
+        pageCount = pages.length
+      } else if (episode.video_path.startsWith('{')) {
+        // New format: {pages: [...]}
+        const data = JSON.parse(episode.video_path)
+        pageCount = data.pages ? data.pages.length : 0
+      }
+    } catch (e) {
+      // Not JSON, probably a video file path
+      isChapter = false
     }
-  } catch (e) {
-    // It's a video file
   }
 
   return (
@@ -104,11 +116,11 @@ export default function EpisodeCard({ episode, seriesType }: EpisodeCardProps) {
             </div>
             
             {episode.description && (
-              <p className="text-sm text-gray-600 mb-2">{episode.description}</p>
+              <p className="text-sm text-gray-600 mb-2 line-clamp-2">{episode.description}</p>
             )}
             
-            <div className="text-xs text-gray-500 flex gap-4">
-              {isChapter && <span>{pageCount} pages</span>}
+            <div className="text-xs text-gray-500 flex gap-4 flex-wrap">
+              {isChapter && pageCount > 0 && <span>{pageCount} pages</span>}
               {episode.duration && <span>{Math.floor(episode.duration / 60)} min</span>}
               {episode.scheduled_at && episode.status === 'scheduled' && (
                 <span>Scheduled: {new Date(episode.scheduled_at).toLocaleString()}</span>
@@ -116,7 +128,10 @@ export default function EpisodeCard({ episode, seriesType }: EpisodeCardProps) {
               {episode.published_at && episode.status === 'published' && (
                 <span>Published: {new Date(episode.published_at).toLocaleDateString()}</span>
               )}
-              <span>{episode.view_count || 0} views</span>
+              {episode.view_count > 0 && <span>{episode.view_count.toLocaleString()} views</span>}
+              {episode.file_size && (
+                <span>{(episode.file_size / 1024 / 1024).toFixed(1)} MB</span>
+              )}
             </div>
           </div>
           
@@ -159,16 +174,30 @@ export default function EpisodeCard({ episode, seriesType }: EpisodeCardProps) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="block px-4 py-2 hover:bg-gray-100 text-sm"
+                      onClick={() => setShowActions(false)}
                     >
                       Watch Episode
                     </a>
                   ) : (
-                    <a
-                      href={`/content/${episode.series_id}/chapter/${episode.id}`}
-                      className="block px-4 py-2 hover:bg-gray-100 text-sm"
-                    >
-                      Read Chapter
-                    </a>
+                    <>
+                      <Link
+                        href={`/content/${episode.series_id}/chapter/${episode.id}`}
+                        className="block px-4 py-2 hover:bg-gray-100 text-sm"
+                        onClick={() => setShowActions(false)}
+                      >
+                        Read Chapter
+                      </Link>
+                      
+                      {pageCount > 0 && (
+                        <Link
+                          href={`/content/${episode.series_id}/chapters/${episode.id}/manage`}
+                          className="block px-4 py-2 hover:bg-gray-100 text-sm"
+                          onClick={() => setShowActions(false)}
+                        >
+                          Manage Pages
+                        </Link>
+                      )}
+                    </>
                   )}
                   
                   <button
@@ -190,6 +219,16 @@ export default function EpisodeCard({ episode, seriesType }: EpisodeCardProps) {
                   >
                     Edit Details
                   </button>
+                  
+                  {episode.status === 'published' && (
+                    <Link
+                      href={`/content/${episode.series_id}/analytics/${episode.id}`}
+                      className="block px-4 py-2 hover:bg-gray-100 text-sm"
+                      onClick={() => setShowActions(false)}
+                    >
+                      View Analytics
+                    </Link>
+                  )}
                   
                   <hr className="my-1" />
                   
