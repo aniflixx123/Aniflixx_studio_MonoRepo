@@ -256,5 +256,265 @@ upload.post('/chapter/:chapterId/pages', async (c) => {
     return c.json({ error: 'Failed to add pages' }, 500)
   }
 })
+// Upload series images (cover, banner, thumbnail)
+upload.post('/series/:seriesId/images', async (c) => {
+  const orgId = c.req.header('X-Org-Id')
+  if (!orgId) {
+    return c.json({ error: 'Organization ID required' }, 401)
+  }
+
+  const seriesId = c.req.param('seriesId')
+
+  try {
+    // Verify series ownership
+    const series:any = await c.env.DB.prepare(`
+      SELECT s.* FROM series s
+      JOIN studios st ON s.studio_id = st.id
+      WHERE s.id = ? AND st.clerk_org_id = ?
+    `).bind(seriesId, orgId).first()
+
+    if (!series) {
+      return c.json({ error: 'Series not found or unauthorized' }, 404)
+    }
+
+    const formData = await c.req.formData()
+    const updates: any = {}
+
+    // Handle cover image
+    const coverImage = formData.get('cover_image') as File
+    if (coverImage) {
+      // Delete old image if exists
+      if (series.cover_image) {
+        await c.env.CONTENT.delete(series.cover_image).catch(() => {})
+      }
+
+      const timestamp = Date.now()
+      const coverPath = `studios/${orgId}/series/${seriesId}/cover-${timestamp}.jpg`
+      
+      await c.env.CONTENT.put(
+        coverPath,
+        await coverImage.arrayBuffer(),
+        {
+          httpMetadata: {
+            contentType: coverImage.type,
+          }
+        }
+      )
+      updates.cover_image = coverPath
+    }
+
+    // Handle banner image
+    const bannerImage = formData.get('banner_image') as File
+    if (bannerImage) {
+      if (series.banner_image) {
+        await c.env.CONTENT.delete(series.banner_image).catch(() => {})
+      }
+
+      const timestamp = Date.now()
+      const bannerPath = `studios/${orgId}/series/${seriesId}/banner-${timestamp}.jpg`
+      
+      await c.env.CONTENT.put(
+        bannerPath,
+        await bannerImage.arrayBuffer(),
+        {
+          httpMetadata: {
+            contentType: bannerImage.type,
+          }
+        }
+      )
+      updates.banner_image = bannerPath
+    }
+
+    // Handle thumbnail
+    const thumbnail = formData.get('thumbnail') as File
+    if (thumbnail) {
+      if (series.thumbnail_image) {
+        await c.env.CONTENT.delete(series.thumbnail_image).catch(() => {})
+      }
+
+      const timestamp = Date.now()
+      const thumbPath = `studios/${orgId}/series/${seriesId}/thumb-${timestamp}.jpg`
+      
+      await c.env.CONTENT.put(
+        thumbPath,
+        await thumbnail.arrayBuffer(),
+        {
+          httpMetadata: {
+            contentType: thumbnail.type,
+          }
+        }
+      )
+      updates.thumbnail_image = thumbPath
+    }
+
+    // Update database with new image paths
+    if (Object.keys(updates).length > 0) {
+      const setClause = Object.keys(updates).map(key => `${key} = ?`).join(', ')
+      await c.env.DB.prepare(`
+        UPDATE series 
+        SET ${setClause}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(...Object.values(updates), seriesId).run()
+    }
+
+    return c.json({ 
+      success: true,
+      message: 'Images uploaded successfully',
+      ...updates 
+    })
+
+  } catch (error) {
+    console.error('Series image upload error:', error)
+    return c.json({ 
+      error: 'Upload failed', 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    }, 500)
+  }
+})
+
+// Update specific series image
+upload.put('/series/:seriesId/image/:imageType', async (c) => {
+  const orgId = c.req.header('X-Org-Id')
+  if (!orgId) {
+    return c.json({ error: 'Organization ID required' }, 401)
+  }
+
+  const seriesId = c.req.param('seriesId')
+  const imageType = c.req.param('imageType') // 'cover', 'banner', 'thumbnail', 'logo'
+
+  // Validate image type
+  const validTypes = ['cover', 'banner', 'thumbnail', 'logo']
+  if (!validTypes.includes(imageType)) {
+    return c.json({ error: 'Invalid image type' }, 400)
+  }
+
+  try {
+    // Verify ownership
+    const series = await c.env.DB.prepare(`
+      SELECT s.* FROM series s
+      JOIN studios st ON s.studio_id = st.id
+      WHERE s.id = ? AND st.clerk_org_id = ?
+    `).bind(seriesId, orgId).first()
+
+    if (!series) {
+      return c.json({ error: 'Series not found or unauthorized' }, 404)
+    }
+
+    const formData = await c.req.formData()
+    const imageFile = formData.get('image') as File
+
+    if (!imageFile) {
+      return c.json({ error: 'No image file provided' }, 400)
+    }
+
+    // Map image type to database column
+    const columnMap: any = {
+      'cover': 'cover_image',
+      'banner': 'banner_image',
+      'thumbnail': 'thumbnail_image',
+      'logo': 'logo_image'
+    }
+    const column = columnMap[imageType]
+
+    // Delete old image if exists
+    const oldImagePath:any = series[column]
+    if (oldImagePath) {
+      await c.env.CONTENT.delete(oldImagePath).catch(() => {})
+    }
+
+    // Upload new image
+    const timestamp = Date.now()
+    const newPath = `studios/${orgId}/series/${seriesId}/${imageType}-${timestamp}.jpg`
+    
+    await c.env.CONTENT.put(
+      newPath,
+      await imageFile.arrayBuffer(),
+      {
+        httpMetadata: {
+          contentType: imageFile.type,
+        }
+      }
+    )
+
+    // Update database
+    await c.env.DB.prepare(`
+      UPDATE series 
+      SET ${column} = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(newPath, seriesId).run()
+
+    return c.json({ 
+      success: true,
+      message: `${imageType} image updated successfully`,
+      path: newPath
+    })
+
+  } catch (error) {
+    console.error('Update image error:', error)
+    return c.json({ error: 'Failed to update image' }, 500)
+  }
+})
+// Delete specific series image
+upload.delete('/series/:seriesId/image/:imageType', async (c) => {
+  const orgId = c.req.header('X-Org-Id')
+  if (!orgId) {
+    return c.json({ error: 'Organization ID required' }, 401)
+  }
+
+  const seriesId = c.req.param('seriesId')
+  const imageType = c.req.param('imageType')
+
+  // Validate image type
+  const validTypes = ['cover', 'banner', 'thumbnail', 'logo']
+  if (!validTypes.includes(imageType)) {
+    return c.json({ error: 'Invalid image type' }, 400)
+  }
+
+  try {
+    // Verify ownership and get current image path
+    const series = await c.env.DB.prepare(`
+      SELECT s.* FROM series s
+      JOIN studios st ON s.studio_id = st.id
+      WHERE s.id = ? AND st.clerk_org_id = ?
+    `).bind(seriesId, orgId).first()
+
+    if (!series) {
+      return c.json({ error: 'Series not found or unauthorized' }, 404)
+    }
+
+    // Map image type to database column
+    const columnMap: any = {
+      'cover': 'cover_image',
+      'banner': 'banner_image',
+      'thumbnail': 'thumbnail_image',
+      'logo': 'logo_image'
+    }
+    const column = columnMap[imageType]
+    const imagePath:any = series[column]
+
+    if (!imagePath) {
+      return c.json({ error: `No ${imageType} image to delete` }, 404)
+    }
+
+    // Delete from R2
+    await c.env.CONTENT.delete(imagePath)
+
+    // Update database - set to null
+    await c.env.DB.prepare(`
+      UPDATE series 
+      SET ${column} = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(seriesId).run()
+
+    return c.json({ 
+      success: true,
+      message: `${imageType} image deleted successfully`
+    })
+
+  } catch (error) {
+    console.error('Delete image error:', error)
+    return c.json({ error: 'Failed to delete image' }, 500)
+  }
+})
 
 export default upload
