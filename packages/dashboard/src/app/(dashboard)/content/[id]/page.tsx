@@ -1,9 +1,12 @@
-// packages/dashboard/src/app/(dashboard)/content/[id]/page.tsx
-import { auth } from '@clerk/nextjs/server'
+'use client'
+
+import { useState, useEffect, use } from 'react'
+import { useAuth } from '@clerk/nextjs'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import SeriesActions from '@/components/SeriesActions'
 import EpisodeCard from '@/components/EpisodeCard'
+import SeriesImageManager from '@/components/SeriesImageManager'
 
 type Series = {
   id: string
@@ -33,6 +36,11 @@ type Series = {
   created_at: string
   updated_at: string
   published_at?: string
+  // Image fields
+  cover_image?: string
+  banner_image?: string
+  thumbnail_image?: string
+  logo_image?: string
 }
 
 type Episode = {
@@ -61,63 +69,6 @@ type Episode = {
   updated_at: string
 }
 
-async function getSeriesDetails(id: string, orgId: string): Promise<Series | null> {
-  try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/series/${id}`,
-      {
-        headers: {
-          'X-Org-Id': orgId
-        },
-        cache: 'no-store'
-      }
-    )
-    
-    if (!response.ok) return null
-    
-    const data:any = await response.json()
-    
-    // Parse JSON fields if they're strings
-    if (typeof data.genres === 'string') {
-      try {
-        data.genres = JSON.parse(data.genres)
-      } catch {
-        data.genres = []
-      }
-    }
-    
-    if (typeof data.tags === 'string') {
-      try {
-        data.tags = JSON.parse(data.tags)
-      } catch {
-        data.tags = []
-      }
-    }
-    
-    return data
-  } catch (error) {
-    console.error('Error fetching series:', error)
-    return null
-  }
-}
-
-async function getEpisodes(seriesId: string): Promise<Episode[]> {
-  try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/series/${seriesId}/episodes`,
-      { cache: 'no-store' }
-    )
-    
-    if (!response.ok) return []
-    
-    const data = await response.json()
-    return Array.isArray(data) ? data : []
-  } catch (error) {
-    console.error('Error fetching episodes:', error)
-    return []
-  }
-}
-
 function getTypeIcon(type: string) {
   switch(type) {
     case 'anime':
@@ -133,26 +84,97 @@ function getTypeIcon(type: string) {
   }
 }
 
-export default async function SeriesDetailPage({ 
+export default function SeriesDetailPage({ 
   params 
 }: { 
   params: Promise<{ id: string }> 
 }) {
-  const { userId, orgId } = await auth()
+  const { userId, orgId } = useAuth()
+  const { id } = use(params)
+  const [series, setSeries] = useState<Series | null>(null)
+  const [episodes, setEpisodes] = useState<Episode[]>([])
+  const [loading, setLoading] = useState(true)
   
-  if (!userId || !orgId) {
-    redirect('/sign-in')
-  }
-  
-  const { id } = await params
-  const series = await getSeriesDetails(id, orgId)
-  
-  if (!series) {
-    redirect('/content')
+  useEffect(() => {
+    if (!userId || !orgId) {
+      redirect('/sign-in')
+    }
+    
+    fetchSeriesData()
+    fetchEpisodes()
+  }, [id, orgId])
+
+  const fetchSeriesData = async () => {
+    try {
+      const response = await fetch(`/api/series/${id}`)
+      
+      if (!response.ok) {
+        redirect('/content')
+        return
+      }
+      
+      const data:any = await response.json()
+      
+      // Parse JSON fields if they're strings
+      if (typeof data.genres === 'string') {
+        try {
+          data.genres = JSON.parse(data.genres)
+        } catch {
+          data.genres = []
+        }
+      }
+      
+      if (typeof data.tags === 'string') {
+        try {
+          data.tags = JSON.parse(data.tags)
+        } catch {
+          data.tags = []
+        }
+      }
+      
+      setSeries(data)
+    } catch (error) {
+      console.error('Error fetching series:', error)
+      redirect('/content')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const episodes = await getEpisodes(id)
-  
+  const fetchEpisodes = async () => {
+    try {
+      const response = await fetch(`/api/series/${id}/episodes`)
+      
+      if (!response.ok) return
+      
+      const data = await response.json()
+      setEpisodes(Array.isArray(data) ? data : [])
+    } catch (error) {
+      console.error('Error fetching episodes:', error)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-8 max-w-7xl mx-auto">
+        <div className="animate-pulse">
+          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <div className="h-10 bg-gray-200 rounded w-1/2 mb-4"></div>
+            <div className="h-20 bg-gray-200 rounded mb-4"></div>
+            <div className="grid grid-cols-5 gap-4">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="h-16 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!series) return null
+
   // Calculate stats
   const publishedEpisodes = episodes.filter(ep => ep.status === 'published').length
   const scheduledEpisodes = episodes.filter(ep => ep.status === 'scheduled').length
@@ -323,6 +345,24 @@ export default async function SeriesDetailPage({
             </Link>
           </div>
         </div>
+      </div>
+
+      {/* Series Images Section */}
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <h2 className="text-xl font-semibold mb-4">Series Images</h2>
+        <SeriesImageManager
+          seriesId={series.id}
+          currentImages={{
+            cover_image: series.cover_image,
+            banner_image: series.banner_image,
+            thumbnail_image: series.thumbnail_image,
+            logo_image: series.logo_image
+          }}
+          onUpdate={() => {
+            // Refresh series data
+            fetchSeriesData()
+          }}
+        />
       </div>
 
       {/* Episodes Section */}
