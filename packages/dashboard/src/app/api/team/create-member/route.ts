@@ -1,4 +1,4 @@
-// packages/dashboard/src/app/api/team/invite/route.ts
+// packages/dashboard/src/app/api/team/create-member/route.ts
 import { auth } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -10,10 +10,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    console.log('Sending invite request:', { orgId, body })
     
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/team/invite`,
+      `${process.env.NEXT_PUBLIC_API_URL}/api/team/create-member`,
       {
         method: 'POST',
         headers: {
@@ -25,12 +24,9 @@ export async function POST(request: NextRequest) {
     )
 
     const data = await response.json()
-    console.log('Backend response:', response.status, data)
-    
-    // Return the actual response from backend, including errors
     return NextResponse.json(data, { status: response.status })
   } catch (error) {
-    console.error('Invite route error:', error)
-    return NextResponse.json({ error: 'Failed to send invitation' }, { status: 500 })
+    console.error('Create member error:', error)
+    return NextResponse.json({ error: 'Failed to create member' }, { status: 500 })
   }
 }

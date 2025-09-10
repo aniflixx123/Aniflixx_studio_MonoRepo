@@ -175,15 +175,12 @@ export default function UploadEpisodePage({
       } else {
         // Upload manga/webtoon chapter
         const uploadData = new FormData()
-        files.forEach((file, index) => {
-          uploadData.append(`page_${index}`, file)
-        })
-        uploadData.append('seriesId', id)
-        uploadData.append('chapterNumber', formData.episodeNumber)
-        uploadData.append('chapterTitle', formData.title)
-        uploadData.append('description', formData.description)
-        uploadData.append('totalPages', files.length.toString())
-        uploadData.append('contentType', series.type)
+files.forEach((file, index) => {
+  uploadData.append(`page_${index}`, file)
+})
+uploadData.append('series_id', id)  // Changed from 'seriesId'
+uploadData.append('episode_number', formData.episodeNumber)  // Changed from 'chapterNumber'
+uploadData.append('title', formData.title) 
         
         // Add publishing settings
         uploadData.append('status', publishOption === 'now' ? 'published' : 
@@ -195,7 +192,7 @@ export default function UploadEpisodePage({
         
         setUploadProgress(30)
         
-        const response = await fetch('/api/upload-chapter', {
+        const response = await fetch('/api/upload/chapter', {
           method: 'POST',
           body: uploadData
         })
