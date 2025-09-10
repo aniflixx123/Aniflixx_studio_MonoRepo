@@ -9,9 +9,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get studio ID from your database or use the org ID
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/team/studio/${orgId}/members`,
+      `${process.env.NEXT_PUBLIC_API_URL}/api/team/members`,
       {
         headers: {
           'X-Org-Id': orgId,
@@ -20,13 +19,14 @@ export async function GET(request: NextRequest) {
     )
 
     if (!response.ok) {
-      throw new Error('Failed to fetch team members')
+      console.error('Backend error:', response.status)
+      return NextResponse.json([])
     }
 
     const data = await response.json()
     return NextResponse.json(data)
   } catch (error) {
-    console.error('Team members error:', error)
-    return NextResponse.json({ error: 'Failed to fetch team members' }, { status: 500 })
+    console.error('Team API error:', error)
+    return NextResponse.json([])
   }
 }
