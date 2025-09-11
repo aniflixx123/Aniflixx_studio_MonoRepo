@@ -1,5 +1,7 @@
+// app/(dashboard)/layout.tsx
 import { auth } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
+import Navigation from '@/components/navigation'
 import { fetchAPI } from '@/lib/api'
 
 type Studio = {
@@ -9,54 +11,101 @@ type Studio = {
   slug: string
   tier: string
   max_users: number
+  storage_used: number
+  storage_total: number
   created_at: string
 }
 
-async function getOrCreateStudio(orgId: string, orgSlug: string): Promise<Studio> {
+type DashboardStats = {
+  contentCount: number
+  totalViews: number
+  publishedCount: number
+  draftCount: number
+  notificationCount: number
+}
+
+async function getStudioData(orgId: string): Promise<Studio | null> {
   try {
-    // Try to get existing studio
     const studio = await fetchAPI(`/api/studio/${orgId}`) as Studio
     return studio
   } catch (error) {
-    // Studio doesn't exist, create it
-    const studio = await fetchAPI('/api/studio', {
-      method: 'POST',
-      body: JSON.stringify({
-        orgId: orgId,
-        name: orgSlug || 'New Studio',
-        slug: orgSlug?.toLowerCase().replace(/\s+/g, '-') || 'new-studio'
-      })
-    }) as Studio
-    return studio
+    return null
   }
 }
 
-export default async function DashboardPage() {
-  const { userId, orgId, orgSlug } = await auth()
+async function getDashboardStats(orgId: string): Promise<DashboardStats> {
+  try {
+    // Fetch all series
+    const series = await fetchAPI('/api/series', {
+      headers: { 'X-Org-Id': orgId }
+    }) as any[]
+    
+    const contentCount = Array.isArray(series) ? series.length : 0
+    const totalViews = series?.reduce((sum: number, item: any) => sum + (item.view_count || 0), 0) || 0
+    const publishedCount = series?.filter((item: any) => item.status === 'published').length || 0
+    const draftCount = series?.filter((item: any) => item.status === 'draft').length || 0
+    
+    // Fetch notification count
+    let notificationCount = 0
+    try {
+      const notif = await fetchAPI('/api/notifications/count', {
+        headers: { 'X-Org-Id': orgId }
+      }) as { count: number }
+      notificationCount = notif.count || 0
+    } catch {}
+    
+    return {
+      contentCount,
+      totalViews,
+      publishedCount,
+      draftCount,
+      notificationCount
+    }
+  } catch (error) {
+    return {
+      contentCount: 0,
+      totalViews: 0,
+      publishedCount: 0,
+      draftCount: 0,
+      notificationCount: 0
+    }
+  }
+}
+
+export default async function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const { userId, orgId } = await auth()
   
   if (!userId) {
     redirect('/sign-in')
   }
   
   let studio: Studio | null = null
+  let stats: DashboardStats = {
+    contentCount: 0,
+    totalViews: 0,
+    publishedCount: 0,
+    draftCount: 0,
+    notificationCount: 0
+  }
+  
   if (orgId) {
-    studio = await getOrCreateStudio(orgId, orgSlug || '')
+    studio = await getStudioData(orgId)
+    stats = await getDashboardStats(orgId)
   }
   
   return (
-    <div className="p-8">
-      <h1 className="text-3xl font-bold">Studio Dashboard</h1>
-      <div className="mt-6 space-y-2">
-        <p>Welcome! You're signed in.</p>
-        {studio && (
-          <div className="mt-4 p-4 bg-gray-100 rounded">
-            <h2 className="font-semibold">Studio Information:</h2>
-            <p>Name: {studio.name}</p>
-            <p>Tier: {studio.tier}</p>
-            <p>Max Users: {studio.max_users}</p>
-          </div>
-        )}
-      </div>
+    <div className="min-h-screen bg-[#0a0a0f]">
+      <Navigation 
+        studio={studio}
+        stats={stats}
+      />
+      <main className="transition-all duration-300">
+        {children}
+      </main>
     </div>
   )
 }

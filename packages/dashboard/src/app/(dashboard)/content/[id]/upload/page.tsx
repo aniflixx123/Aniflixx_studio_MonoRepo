@@ -164,7 +164,7 @@ export default function UploadEpisodePage({
         
         setUploadProgress(30)
         
-        const response = await fetch('/api/upload', {
+        const response = await fetch('/api/upload/chapter', {
           method: 'POST',
           body: uploadData
         })
