@@ -97,28 +97,50 @@ export default function Navigation({ studio, stats }: NavigationProps) {
   // Mobile menu state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   
-  // Save sidebar state to localStorage
+  // Save sidebar state and apply padding to main content
   useEffect(() => {
+    // Save to localStorage
     localStorage.setItem('sidebarOpen', JSON.stringify(isSidebarOpen))
-    // Update body padding based on sidebar state
-    document.body.style.paddingLeft = isSidebarOpen ? '240px' : '60px'
     
-    // For mobile, remove padding
-    const handleResize = () => {
-      if (window.innerWidth < 1024) {
-        document.body.style.paddingLeft = '0'
-      } else {
-        document.body.style.paddingLeft = isSidebarOpen ? '240px' : '60px'
+    // Apply padding to main content area
+    const updateLayout = () => {
+      const mainContent = document.getElementById('main-content')
+      if (mainContent) {
+        if (window.innerWidth < 1024) {
+          mainContent.style.paddingLeft = '0'
+        } else {
+          mainContent.style.paddingLeft = isSidebarOpen ? '240px' : '60px'
+        }
       }
     }
     
-    handleResize()
-    window.addEventListener('resize', handleResize)
+    // Apply immediately
+    updateLayout()
+    
+    // Also apply on resize
+    window.addEventListener('resize', updateLayout)
+    
     return () => {
-      window.removeEventListener('resize', handleResize)
-      document.body.style.paddingLeft = '0'
+      window.removeEventListener('resize', updateLayout)
     }
   }, [isSidebarOpen])
+  
+  // Update on pathname change to fix navigation issues
+  useEffect(() => {
+    const updateLayout = () => {
+      const mainContent = document.getElementById('main-content')
+      if (mainContent) {
+        if (window.innerWidth < 1024) {
+          mainContent.style.paddingLeft = '0'
+        } else {
+          mainContent.style.paddingLeft = isSidebarOpen ? '240px' : '60px'
+        }
+      }
+    }
+    
+    // Apply on route change
+    updateLayout()
+  }, [pathname, isSidebarOpen])
   
   const mainNavItems: NavItem[] = [
     {
@@ -284,14 +306,14 @@ export default function Navigation({ studio, stats }: NavigationProps) {
                 <TooltipTrigger asChild>
                   <Button 
                     variant="ghost" 
-                    size="icon"
+                    size="icon" 
                     className="text-gray-300 hover:text-white hover:bg-[#2a2435]"
-                    onClick={() => router.refresh()}
+                    onClick={() => window.location.reload()}
                   >
                     <RefreshCw className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Refresh data</TooltipContent>
+                <TooltipContent>Refresh</TooltipContent>
               </Tooltip>
             </TooltipProvider>
             
@@ -301,23 +323,18 @@ export default function Navigation({ studio, stats }: NavigationProps) {
                 <TooltipTrigger asChild>
                   <Button 
                     variant="ghost" 
-                    size="icon"
-                    className="text-gray-300 hover:text-white hover:bg-[#2a2435] relative"
+                    size="icon" 
+                    className="relative text-gray-300 hover:text-white hover:bg-[#2a2435]"
                   >
                     <Bell className="h-4 w-4" />
-                    {stats && stats.notificationCount > 0 && (
-                      <>
-                        <span className="absolute top-1 right-1 w-2 h-2 bg-pink-500 rounded-full animate-pulse"></span>
-                        <span className="absolute -top-1 -right-1 bg-pink-500 text-white text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center font-medium">
-                          {stats.notificationCount}
-                        </span>
-                      </>
+                    {stats?.notificationCount && stats.notificationCount > 0 && (
+                      <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 rounded-full text-xs text-white flex items-center justify-center">
+                        {stats.notificationCount}
+                      </span>
                     )}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {stats?.notificationCount || 0} notifications
-                </TooltipContent>
+                <TooltipContent>Notifications</TooltipContent>
               </Tooltip>
             </TooltipProvider>
             
@@ -326,64 +343,40 @@ export default function Navigation({ studio, stats }: NavigationProps) {
               <DropdownMenuTrigger asChild>
                 <Button 
                   variant="ghost" 
-                  className="text-gray-300 hover:text-white hover:bg-[#2a2435] gap-2"
+                  className="flex items-center gap-2 text-gray-300 hover:text-white hover:bg-[#2a2435]"
                 >
-                  <span className="hidden sm:inline text-sm">
-                    {organization?.name || user?.firstName || studio?.name || 'Account'}
-                  </span>
-                  {user?.imageUrl ? (
-                    <img 
-                      src={user.imageUrl} 
-                      alt={user.firstName || 'User'} 
-                      className="w-8 h-8 rounded-full"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
-                      <span className="text-white text-sm font-medium">
-                        {user?.firstName?.[0] || studio?.name?.[0] || 'U'}
-                      </span>
-                    </div>
-                  )}
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-[#1a1625] border-[#2a2435] text-white w-56">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col">
-                    <span>{user?.fullName || studio?.name || 'User'}</span>
-                    <span className="text-xs text-gray-400 font-normal">
-                      {user?.primaryEmailAddress?.emailAddress}
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                    <span className="text-white text-sm font-medium">
+                      {user?.firstName?.[0] || organization?.name?.[0] || 'U'}
                     </span>
                   </div>
+                  <ChevronDown className="h-3 w-3 hidden sm:block" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 bg-[#1a1625] border-[#2a2435] text-white">
+                <DropdownMenuLabel className="text-gray-400">
+                  {organization?.name || 'My Account'}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-[#2a2435]" />
-                <DropdownMenuItem className="cursor-pointer" asChild>
-                  <Link href="/settings">
-                    <User className="h-4 w-4 mr-2" />
-                    Profile Settings
-                  </Link>
+                <DropdownMenuItem className="text-gray-300 hover:text-white hover:bg-[#2a2435] cursor-pointer">
+                  <User className="mr-2 h-4 w-4" />
+                  Profile
                 </DropdownMenuItem>
-                {organization && (
-                  <DropdownMenuItem className="cursor-pointer" asChild>
-                    <Link href="/settings/organization">
-                      <Settings className="h-4 w-4 mr-2" />
-                      Organization Settings
-                    </Link>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem className="cursor-pointer" asChild>
-                  <Link href="/billing">
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    Billing & Plan
-                  </Link>
+                <DropdownMenuItem className="text-gray-300 hover:text-white hover:bg-[#2a2435] cursor-pointer">
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Billing
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-gray-300 hover:text-white hover:bg-[#2a2435] cursor-pointer">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-[#2a2435]" />
                 <DropdownMenuItem 
-                  className="text-red-400 cursor-pointer"
+                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer"
                   onClick={handleSignOut}
                 >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Sign Out
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -393,12 +386,12 @@ export default function Navigation({ studio, stats }: NavigationProps) {
 
       {/* Desktop Sidebar */}
       <aside className={cn(
-        "hidden lg:block fixed left-0 top-[57px] bottom-0 bg-[#141019] border-r border-[#2a2435] transition-all duration-300 overflow-hidden",
+        "hidden lg:flex fixed left-0 top-[57px] bottom-0 bg-[#141019] border-r border-[#2a2435] transition-all duration-200 ease-linear z-40",
         isSidebarOpen ? "w-[240px]" : "w-[60px]"
       )}>
-        <div className="flex flex-col h-full">
-          {/* Main Navigation */}
-          <div className="flex-1 overflow-y-auto py-4">
+        <div className="flex flex-col w-full h-full">
+          {/* Navigation Items */}
+          <div className="flex-1 py-4 overflow-y-auto">
             <nav className="space-y-1 px-3">
               {mainNavItems.map((item) => (
                 <TooltipProvider key={item.href}>
@@ -407,43 +400,38 @@ export default function Navigation({ studio, stats }: NavigationProps) {
                       <Link
                         href={item.href}
                         className={cn(
-                          "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group",
+                          "flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
                           isActive(item.href)
                             ? "bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white"
                             : "text-gray-400 hover:text-white hover:bg-[#1a1625]",
                           !isSidebarOpen && "justify-center"
                         )}
                       >
-                        <div className={cn(
-                          "flex items-center gap-3",
-                          !isSidebarOpen && "justify-center"
-                        )}>
+                        <div className="flex items-center gap-3">
                           {item.icon}
-                          {isSidebarOpen && (
-                            <>
-                              <span className="flex-1">{item.label}</span>
-                              {item.badge && (
-                                <Badge 
-                                  variant={item.badgeColor === 'success' ? 'default' : 'secondary'}
-                                  className={cn(
-                                    "text-xs ml-auto",
-                                    item.badgeColor === 'success' 
-                                      ? "bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0"
-                                      : "bg-[#2a2435] text-gray-300"
-                                  )}
-                                >
-                                  {item.badge}
-                                </Badge>
-                              )}
-                            </>
-                          )}
+                          {isSidebarOpen && <span>{item.label}</span>}
                         </div>
+                        {isSidebarOpen && item.badge && (
+                          <Badge 
+                            variant={item.badgeColor === 'success' ? 'default' : 'secondary'}
+                            className={cn(
+                              "text-xs",
+                              item.badgeColor === 'success' 
+                                ? "bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0"
+                                : "bg-[#2a2435] text-gray-300"
+                            )}
+                          >
+                            {item.badge}
+                          </Badge>
+                        )}
                       </Link>
                     </TooltipTrigger>
                     {!isSidebarOpen && (
                       <TooltipContent side="right">
-                        <span>{item.label}</span>
-                        {item.badge && <span className="ml-2">({item.badge})</span>}
+                        {item.label}
+                        {item.badge && (
+                          <span className="ml-2 text-xs">({item.badge})</span>
+                        )}
                       </TooltipContent>
                     )}
                   </Tooltip>
@@ -451,20 +439,33 @@ export default function Navigation({ studio, stats }: NavigationProps) {
               ))}
             </nav>
           </div>
-
+          
           {/* Bottom Section */}
           <div className="border-t border-[#2a2435] py-4 space-y-4">
             {/* Security Badge */}
-            <div className="px-3">
+            <div className={cn(
+              "px-6",
+              !isSidebarOpen && "px-3"
+            )}>
               <div className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-lg",
-                "bg-green-500/10 text-green-400",
-                !isSidebarOpen && "justify-center px-0"
+                "flex items-center gap-2 text-xs",
+                !isSidebarOpen && "justify-center"
               )}>
-                <Shield className="h-4 w-4 flex-shrink-0" />
-                {isSidebarOpen && (
+                {!isSidebarOpen ? (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <Shield className="h-4 w-4 text-green-400" />
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        256-bit SSL • Data Security • GDPR
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
                   <>
-                    <span className="text-sm font-medium">Data Security</span>
+                    <Shield className="h-3 w-3 text-green-400" />
+                    <span className="text-gray-400">256-bit SSL • Data Security</span>
                     <span className="text-xs ml-auto">GDPR</span>
                   </>
                 )}
