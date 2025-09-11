@@ -34,7 +34,8 @@ import {
   TrendingUp,
   DollarSign,
   AlertCircle,
-  Search
+  Search,
+  Plus
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -105,11 +106,31 @@ export default function ContentGrid({ initialSeries, orgId }: ContentGridProps) 
     return num.toString()
   }
 
+  // Get the image URL properly
+  function getImageUrl(imagePath: string | undefined): string {
+    if (!imagePath) return ''
+    
+    // If it's already a full URL, return it
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return imagePath
+    }
+    
+    // Use the API URL from environment or construct the path
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+    if (apiUrl) {
+      return `${apiUrl}/api/files/${imagePath}`
+    }
+    
+    // Fallback to relative path
+    return `/api/files/${imagePath}`
+  }
+
   // Calculate metrics
   const metrics = {
     total: series.length,
     published: series.filter(s => s.status === 'published').length,
     views: series.reduce((sum, s) => sum + (s.view_count || 0), 0),
+    // Fix: Use actual revenue or 0, not random number
     revenue: series.reduce((sum, s) => sum + (s.revenue || 0), 0)
   }
 
@@ -159,11 +180,11 @@ export default function ContentGrid({ initialSeries, orgId }: ContentGridProps) 
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-[#1a1625] border-[#2a2435]">
-            <SelectItem value="all" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">All Types</SelectItem>
-            <SelectItem value="anime" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">Anime</SelectItem>
-            <SelectItem value="manga" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">Manga</SelectItem>
-            <SelectItem value="webtoon" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">Webtoon</SelectItem>
-            <SelectItem value="light_novel" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">Light Novel</SelectItem>
+            <SelectItem value="all" className="text-white">All Types</SelectItem>
+            <SelectItem value="anime" className="text-white">Anime</SelectItem>
+            <SelectItem value="manga" className="text-white">Manga</SelectItem>
+            <SelectItem value="webtoon" className="text-white">Webtoon</SelectItem>
+            <SelectItem value="light_novel" className="text-white">Light Novel</SelectItem>
           </SelectContent>
         </Select>
 
@@ -172,11 +193,20 @@ export default function ContentGrid({ initialSeries, orgId }: ContentGridProps) 
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-[#1a1625] border-[#2a2435]">
-            <SelectItem value="all" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">All Status</SelectItem>
-            <SelectItem value="published" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">Published</SelectItem>
-            <SelectItem value="draft" className="text-white hover:bg-[#2a2435] focus:bg-[#2a2435]">Draft</SelectItem>
+            <SelectItem value="all" className="text-white">All Status</SelectItem>
+            <SelectItem value="published" className="text-white">Published</SelectItem>
+            <SelectItem value="draft" className="text-white">Draft</SelectItem>
+            <SelectItem value="scheduled" className="text-white">Scheduled</SelectItem>
           </SelectContent>
         </Select>
+
+        <Button 
+          onClick={() => router.push('/upload')}
+          className="bg-purple-600 hover:bg-purple-700 text-white"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Content
+        </Button>
       </div>
 
       {/* Content Table */}
@@ -225,9 +255,13 @@ export default function ContentGrid({ initialSeries, orgId }: ContentGridProps) 
                       <div className="flex items-center gap-4">
                         {item.cover_image ? (
                           <img 
-                            src={item.cover_image} 
+                            src={getImageUrl(item.cover_image)} 
                             alt={item.title}
                             className="w-10 h-14 object-cover rounded"
+                            onError={(e) => {
+                              // Hide broken images
+                              (e.target as HTMLImageElement).style.display = 'none'
+                            }}
                           />
                         ) : (
                           <div className="w-10 h-14 bg-[#2a2435] rounded flex items-center justify-center">
@@ -267,7 +301,8 @@ export default function ContentGrid({ initialSeries, orgId }: ContentGridProps) 
                         className={cn(
                           "text-xs",
                           item.status === 'published' && "bg-green-500/20 text-green-400 border-green-500/50",
-                          item.status === 'draft' && "bg-gray-500/20 text-gray-400 border-gray-500/50"
+                          item.status === 'draft' && "bg-gray-500/20 text-gray-400 border-gray-500/50",
+                          item.status === 'scheduled' && "bg-blue-500/20 text-blue-400 border-blue-500/50"
                         )}
                       >
                         {item.status}
@@ -292,7 +327,7 @@ export default function ContentGrid({ initialSeries, orgId }: ContentGridProps) 
                       <div className="flex items-center gap-1">
                         <DollarSign className="h-3 w-3 text-gray-500" />
                         <span className="text-sm text-gray-300">
-                          {formatNumber(item.revenue || Math.floor(Math.random() * 10000))}
+                          {formatNumber(item.revenue || 0)}
                         </span>
                       </div>
                     </td>
