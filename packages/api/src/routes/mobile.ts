@@ -33,7 +33,7 @@ const transformSeries = (series: any, baseUrl: string) => {
   };
 }
 
-// packages/api/src/routes/mobile.ts - in transformEpisode function
+// Helper to transform episode data with full image URLs
 const transformEpisode = (episode: any, baseUrl: string) => {
   if (!episode) return null;
   
@@ -141,7 +141,7 @@ mobile.get('/series/:id', async (c) => {
   }
 })
 
-// Get chapters for a series
+// Get chapters for a series - FIXED TO INCLUDE studio_id
 mobile.get('/series/:id/chapters', async (c) => {
   const seriesId = c.req.param('id')
   const { page = '1', limit = '50' } = c.req.query()
@@ -150,9 +150,9 @@ mobile.get('/series/:id/chapters', async (c) => {
   try {
     const offset = (parseInt(page) - 1) * parseInt(limit)
     
-    // First get the series type to know how to handle the content
+    // First get the series type AND studio_id
     const series = await c.env.DB.prepare(
-      'SELECT type FROM series WHERE id = ?'
+      'SELECT type, studio_id FROM series WHERE id = ?'
     ).bind(seriesId).first()
     
     if (!series) {
@@ -160,19 +160,21 @@ mobile.get('/series/:id/chapters', async (c) => {
     }
     
     const episodes = await c.env.DB.prepare(`
-      SELECT * FROM episodes 
-      WHERE series_id = ? 
-        AND status = 'published'
-        AND deleted_at IS NULL
-        AND (scheduled_at IS NULL OR scheduled_at <= datetime('now'))
-      ORDER BY episode_number ASC
+      SELECT e.*, ? as studio_id
+      FROM episodes e
+      WHERE e.series_id = ? 
+        AND e.status = 'published'
+        AND e.deleted_at IS NULL
+        AND (e.scheduled_at IS NULL OR e.scheduled_at <= datetime('now'))
+      ORDER BY e.episode_number ASC
       LIMIT ? OFFSET ?
-    `).bind(seriesId, parseInt(limit), offset).all()
+    `).bind(series.studio_id, seriesId, parseInt(limit), offset).all()
     
-    // Transform episodes with type info
+    // Transform episodes with type and studio info
     const transformedEpisodes = (episodes.results || []).map(ep => ({
       ...transformEpisode(ep, baseUrl),
-      type: series.type, // Include type for frontend to know how to handle
+      type: series.type,
+      studio_id: series.studio_id
     }))
     
     return c.json(transformedEpisodes)
@@ -182,14 +184,14 @@ mobile.get('/series/:id/chapters', async (c) => {
   }
 })
 
-// Get single chapter/episode details
+// Get single chapter/episode details - FIXED TO INCLUDE studio_id
 mobile.get('/chapters/:id', async (c) => {
   const chapterId = c.req.param('id')
   const baseUrl = `https://${c.req.header('host') || 'studio-dashboard-api.black-poetry-4fa5.workers.dev'}`
   
   try {
     const episode = await c.env.DB.prepare(`
-      SELECT e.*, s.type 
+      SELECT e.*, s.type, s.studio_id 
       FROM episodes e
       JOIN series s ON e.series_id = s.id
       WHERE e.id = ? 
