@@ -64,7 +64,7 @@ export default function HomePage() {
               <Link href="/" className="flex items-center">
                 <div className="relative w-10 h-10 mr-2">
                   <Image 
-                    src="/logo.png"
+                    src="/logo1.png"
                     alt="Aniflixx Logo"
                     fill
                     className="object-contain"
@@ -145,7 +145,7 @@ export default function HomePage() {
               <Link href="/" className="flex items-center">
                 <div className="relative w-8 h-8 mr-2">
                   <Image 
-                    src="/logo.png"
+                    src="/logo1.png"
                     alt="Aniflixx Logo"
                     fill
                     className="object-contain"
@@ -865,7 +865,7 @@ export default function HomePage() {
               <Link href="/" className="flex items-center mb-4">
                 <div className="relative w-10 h-10 mr-2">
                   <Image 
-                    src="/logo.png"
+                    src="/logo1.png"
                     alt="Aniflixx Logo"
                     fill
                     className="object-contain"

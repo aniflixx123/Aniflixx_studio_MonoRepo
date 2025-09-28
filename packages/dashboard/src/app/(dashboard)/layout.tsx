@@ -4,7 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import Navigation from '@/components/navigation'
 import { fetchAPI } from '@/lib/api'
-
+ 
 interface Studio {
   id: string
   name: string

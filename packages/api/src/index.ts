@@ -21,10 +21,9 @@ const app = new Hono<{ Bindings: Bindings }>()
 // Enable CORS for dashboard
 app.use('/*', cors({
   origin: [
-    'http://localhost:3000', 
-    'http://localhost:3001', 
-    'https://studio.aniflixx.com',
-    'https://*.vercel.app' // Add Vercel preview URLs
+      'https://aniflixx.com',
+  'https://www.aniflixx.com',
+  'http://localhost:3000'
   ],
   credentials: true,
   allowHeaders: ['Content-Type', 'X-Org-Id', 'Authorization'],
