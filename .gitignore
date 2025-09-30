@@ -5,4 +5,4 @@ dist
 .next
 .wrangler
 .turbo
-packages/dashboard/wrangler.toml
+packages/dashboard/wrangler.tomlpackages/dashboard/wrangler.toml
