@@ -19,8 +19,8 @@ export const metadata: Metadata = {
   description: 'Watch the latest anime episodes, read manga chapters, and enjoy webtoons all in one premium streaming platform. HD quality, no ads, updated daily.',
   keywords: ['anime streaming', 'watch anime online', 'manga reader', 'webtoon platform', 'AniFlixx', 'anime episodes', 'manga chapters'],
   authors: [{ name: 'AniFlixx' }],
-  creator: 'AniFlixx',
-  publisher: 'AniFlixx',
+  creator: 'Aniflixx',
+  publisher: 'Aniflixx',
   formatDetection: {
     email: false,
     address: false,
@@ -28,10 +28,10 @@ export const metadata: Metadata = {
   },
   metadataBase: new URL('https://aniflixx.com'),
   openGraph: {
-    title: 'AniFlixx - Your Premium Anime Streaming Platform',
+    title: 'Aniflixx - Your Premium Anime Streaming Platform',
     description: 'Stream HD anime, read manga, and enjoy webtoons. New episodes daily, no ads, premium experience.',
     url: 'https://aniflixx.com',
-    siteName: 'AniFlixx',
+    siteName: 'Aniflixx',
     images: [
       {
         url: '/logo.png',

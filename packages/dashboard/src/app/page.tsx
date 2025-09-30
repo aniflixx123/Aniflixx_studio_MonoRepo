@@ -64,7 +64,7 @@ export default function HomePage() {
               <Link href="/" className="flex items-center">
                 <div className="relative w-10 h-10 mr-2">
                   <Image 
-                    src="/logo1.png"
+                    src="/logo.png"
                     alt="Aniflixx Logo"
                     fill
                     className="object-contain"
@@ -145,7 +145,7 @@ export default function HomePage() {
               <Link href="/" className="flex items-center">
                 <div className="relative w-8 h-8 mr-2">
                   <Image 
-                    src="/logo1.png"
+                    src="/logo.png"
                     alt="Aniflixx Logo"
                     fill
                     className="object-contain"
@@ -865,7 +865,7 @@ export default function HomePage() {
               <Link href="/" className="flex items-center mb-4">
                 <div className="relative w-10 h-10 mr-2">
                   <Image 
-                    src="/logo1.png"
+                    src="/logo.png"
                     alt="Aniflixx Logo"
                     fill
                     className="object-contain"
@@ -908,7 +908,7 @@ export default function HomePage() {
               <h4 className="font-semibold text-gray-900 mb-4">Studios</h4>
               <ul className="space-y-2">
                 <li><Link href="/sign-in" className="text-sm text-gray-600 hover:text-gray-900">Dashboard Login</Link></li>
-                <li><Link href="/docs" className="text-sm text-gray-600 hover:text-gray-900">Documentation</Link></li>
+                <li><Link href="/documentation" className="text-sm text-gray-600 hover:text-gray-900">Documentation</Link></li>
               </ul>
             </div>
             <div>
@@ -922,7 +922,7 @@ export default function HomePage() {
           </div>
           <div className="mt-12 pt-8 border-t border-gray-100 flex flex-col md:flex-row justify-between items-center">
             <p className="text-sm text-gray-600">
-              © 2025 Aniflixx. All rights reserved.
+              © 2025 Aniflixxx. All rights reserved.
             </p>
             <div className="flex space-x-6 mt-4 md:mt-0">
               <Link href="/privacy" className="text-sm text-gray-600 hover:text-gray-900">Privacy</Link>
